@@ -9,6 +9,7 @@ import { upsertOverride, deleteOverride } from "@/app/(coach)/coach/calendar/act
 
 interface WorkoutExercise {
   id: string;
+  exercise_id?: string;
   exercise_name: string;
   sets: number | null;
   reps: string | null;
@@ -82,13 +83,17 @@ interface PastePreviewRow {
   values: string[];
 }
 
+// athleteId -> exerciseId -> max value in lbs
+type MaxesMap = Record<string, Record<string, number>>;
+
 interface IndividualizationProps {
   exercises: WorkoutExercise[];
   athletes: Athlete[];
   initialOverrides: Override[];
+  maxesMap?: MaxesMap;
 }
 
-export function Individualization({ exercises, athletes, initialOverrides }: IndividualizationProps) {
+export function Individualization({ exercises, athletes, initialOverrides, maxesMap }: IndividualizationProps) {
   const [overrideMap, setOverrideMap] = useState<OverrideMap>(() => buildOverrideMap(initialOverrides));
   const [editing, setEditing] = useState<EditState | null>(null);
   const [saving, setSaving] = useState(false);
@@ -267,7 +272,12 @@ export function Individualization({ exercises, athletes, initialOverrides }: Ind
                 {exercises.map((we) => (
                   <th key={we.id} className="px-3 py-2 text-left font-medium text-xs min-w-[140px]">
                     <div className="font-medium truncate max-w-[130px]">{we.exercise_name}</div>
-                    <div className="text-muted-foreground font-normal">{baseLabel(we)}</div>
+                    <div className="text-muted-foreground font-normal">
+                      {baseLabel(we)}
+                      {we.load_type === "percent_1rm" && (
+                        <span className="ml-1 text-primary/70">%1RM</span>
+                      )}
+                    </div>
                   </th>
                 ))}
               </tr>
@@ -280,6 +290,13 @@ export function Individualization({ exercises, athletes, initialOverrides }: Ind
                   </td>
                   {exercises.map((we) => {
                     const override = overrideMap[we.id]?.[athlete.id];
+                    const athleteMax = we.exercise_id ? maxesMap?.[athlete.id]?.[we.exercise_id] : undefined;
+                    const effectiveLoad = override?.load ?? we.load;
+                    const effectiveLoadType = override?.load_type ?? we.load_type;
+                    const calcLbs = athleteMax && effectiveLoad && effectiveLoadType === "percent_1rm"
+                      ? Math.round(athleteMax * effectiveLoad / 100)
+                      : null;
+
                     return (
                       <td key={we.id} className="px-3 py-2">
                         <button
@@ -291,6 +308,11 @@ export function Individualization({ exercises, athletes, initialOverrides }: Ind
                           }`}
                         >
                           {override ? overrideLabel(override) : "—"}
+                          {calcLbs && (
+                            <span className="block text-[10px] text-muted-foreground font-normal">
+                              = {calcLbs} lbs
+                            </span>
+                          )}
                         </button>
                       </td>
                     );

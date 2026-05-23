@@ -78,6 +78,7 @@ interface WorkoutBuilderProps {
   calendarId: string;
   athletes?: Athlete[];
   initialOverrides?: Override[];
+  maxesMap?: Record<string, Record<string, number>>;
 }
 
 const LOAD_TYPE_LABELS = { absolute: "lbs", percent_1rm: "%", bodyweight: "BW" };
@@ -202,7 +203,7 @@ function ExerciseRow({
 
 type Tab = "prescription" | "individualize";
 
-export function WorkoutBuilder({ workout, initialExercises, allExercises, calendarId, athletes = [], initialOverrides = [] }: WorkoutBuilderProps) {
+export function WorkoutBuilder({ workout, initialExercises, allExercises, calendarId, athletes = [], initialOverrides = [], maxesMap = {} }: WorkoutBuilderProps) {
   const supabase = createClient();
   const [exercises, setExercises] = useState<WorkoutExerciseRow[]>(initialExercises);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -374,6 +375,7 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
   // Exercises shaped for the Individualization component
   const individualizationExercises = exercises.map((e) => ({
     id: e.id,
+    exercise_id: e.exercise_id,
     exercise_name: e.exercise_name,
     sets: e.sets,
     reps: e.reps,
@@ -506,6 +508,7 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
           exercises={individualizationExercises}
           athletes={athletes}
           initialOverrides={initialOverrides}
+          maxesMap={maxesMap}
         />
       )}
 
