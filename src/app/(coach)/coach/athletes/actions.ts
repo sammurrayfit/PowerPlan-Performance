@@ -28,6 +28,12 @@ export async function inviteAthlete(formData: FormData) {
 
   if (error || !invited.user) throw new Error(error?.message ?? "Invite failed");
 
+  // Explicitly create the profile — don't wait for the DB trigger
+  await admin.from("profiles").upsert(
+    { id: invited.user.id, full_name: fullName, role: "athlete" },
+    { onConflict: "id" }
+  );
+
   await admin.from("team_memberships").upsert(
     { team_id: teamId, athlete_id: invited.user.id },
     { onConflict: "team_id,athlete_id", ignoreDuplicates: true }

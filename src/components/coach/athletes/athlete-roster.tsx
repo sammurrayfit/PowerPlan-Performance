@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,7 @@ interface AthleteRosterProps {
 }
 
 function AddAthleteDialog({ teams }: { teams: Team[] }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [selectedTeamId, setSelectedTeamId] = useState<string>(teams[0]?.id ?? "__new__");
@@ -50,6 +52,7 @@ function AddAthleteDialog({ teams }: { teams: Team[] }) {
       setOpen(false);
       setNewTeamName("");
       setSelectedTeamId(teams[0]?.id ?? "__new__");
+      router.refresh();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to send invite");
     } finally {
@@ -120,6 +123,7 @@ function AddAthleteDialog({ teams }: { teams: Team[] }) {
 }
 
 function CreateTeamDialog({ onCreated }: { onCreated: () => void }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
@@ -132,6 +136,7 @@ function CreateTeamDialog({ onCreated }: { onCreated: () => void }) {
       setOpen(false);
       setName("");
       onCreated();
+      router.refresh();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to create team");
     } finally {
