@@ -17,8 +17,13 @@ type Exercise = Database["public"]["Tables"]["exercises"]["Row"];
 type Category = Database["public"]["Tables"]["exercise_categories"]["Row"];
 
 const MUSCLE_GROUPS = [
-  "Chest", "Shoulders", "Triceps", "Biceps", "Back", "Lats", "Traps",
-  "Quads", "Hamstrings", "Glutes", "Calves", "Abs", "Obliques", "Lower Back", "Full Body",
+  "Chest",
+  "Anterior Deltoid", "Middle Deltoid", "Posterior Deltoid",
+  "Triceps", "Biceps", "Forearms",
+  "Back", "Latissimus Dorsi", "Trapezius", "Neck",
+  "Quads", "Hamstrings", "Glutes", "Adductors", "Abductors", "Calves", "Anterior Tibialis",
+  "Rectus Abdominis", "Lower Core", "Obliques", "Lower Back",
+  "Full Body",
 ];
 
 interface ExerciseFormProps {

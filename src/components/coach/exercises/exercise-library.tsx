@@ -19,9 +19,20 @@ interface ExerciseLibraryProps {
   userId: string;
 }
 
+const MUSCLE_GROUPS = [
+  "Chest",
+  "Anterior Deltoid", "Middle Deltoid", "Posterior Deltoid",
+  "Triceps", "Biceps", "Forearms",
+  "Back", "Latissimus Dorsi", "Trapezius", "Neck",
+  "Quads", "Hamstrings", "Glutes", "Adductors", "Abductors", "Calves", "Anterior Tibialis",
+  "Rectus Abdominis", "Lower Core", "Obliques", "Lower Back",
+  "Full Body",
+];
+
 export function ExerciseLibrary({ exercises, categories, userId }: ExerciseLibraryProps) {
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [activeMuscle, setActiveMuscle] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
   const filtered = exercises.filter((ex) => {
@@ -30,7 +41,8 @@ export function ExerciseLibrary({ exercises, categories, userId }: ExerciseLibra
       ex.name.toLowerCase().includes(search.toLowerCase()) ||
       ex.muscle_groups.some((m) => m.toLowerCase().includes(search.toLowerCase()));
     const matchesCategory = !activeCategory || ex.category_id === activeCategory;
-    return matchesSearch && matchesCategory;
+    const matchesMuscle = !activeMuscle || ex.muscle_groups.includes(activeMuscle);
+    return matchesSearch && matchesCategory && matchesMuscle;
   });
 
   // Only show categories that have exercises
@@ -97,6 +109,30 @@ export function ExerciseLibrary({ exercises, categories, userId }: ExerciseLibra
           ))}
         </div>
       )}
+
+      {/* Muscle group filter */}
+      <div className="space-y-1">
+        <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Muscle group</p>
+        <div className="flex flex-wrap gap-2">
+          <Badge
+            variant={activeMuscle === null ? "default" : "outline"}
+            className="cursor-pointer"
+            onClick={() => setActiveMuscle(null)}
+          >
+            All
+          </Badge>
+          {MUSCLE_GROUPS.map((m) => (
+            <Badge
+              key={m}
+              variant={activeMuscle === m ? "default" : "outline"}
+              className="cursor-pointer"
+              onClick={() => setActiveMuscle(activeMuscle === m ? null : m)}
+            >
+              {m}
+            </Badge>
+          ))}
+        </div>
+      </div>
 
       {/* Grid */}
       {filtered.length > 0 ? (

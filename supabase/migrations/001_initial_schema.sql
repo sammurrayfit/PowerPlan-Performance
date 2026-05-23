@@ -72,7 +72,7 @@ create table public.exercises (
   image_url text,
   category_id uuid references public.exercise_categories(id),
   muscle_groups text[] default '{}',
-  created_by uuid not null references public.profiles(id) on delete cascade,
+  created_by uuid references public.profiles(id) on delete set null,
   is_public boolean default true not null,
   created_at timestamptz default now() not null
 );
@@ -260,7 +260,9 @@ create policy "categories_read" on public.exercise_categories for select using (
 
 -- Exercises: public ones readable by all; coaches manage their own
 create policy "exercises_read_public" on public.exercises for select using (is_public = true or created_by = auth.uid());
-create policy "exercises_coach_write" on public.exercises for all using (created_by = auth.uid());
+create policy "exercises_coach_insert" on public.exercises for insert with check (created_by = auth.uid());
+create policy "exercises_coach_update" on public.exercises for update using (created_by = auth.uid());
+create policy "exercises_coach_delete" on public.exercises for delete using (created_by = auth.uid());
 
 -- Calendars: coaches own; athletes can read calendars for their teams
 create policy "calendars_coach_all" on public.calendars for all using (coach_id = auth.uid());
