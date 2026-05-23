@@ -29,8 +29,11 @@ interface ExcelImportProps {
 
 function detectColumns(headers: string[]) {
   const h = headers.map((s) => String(s ?? "").toLowerCase().trim());
-  const find = (...terms: string[]) =>
-    h.findIndex((col) => terms.some((t) => col.includes(t)));
+  const find = (...terms: string[]) => {
+    const exact = h.findIndex((col) => terms.includes(col));
+    if (exact >= 0) return exact;
+    return h.findIndex((col) => terms.some((t) => col.includes(t)));
+  };
   return {
     exercise: find("exercise", "name", "movement", "lift", "drill"),
     sets: find("sets", "set"),

@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { FileSpreadsheet, AlertTriangle } from "lucide-react";
+import { FileSpreadsheet, AlertTriangle, Download } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 interface Athlete {
@@ -65,6 +65,9 @@ function toDateStr(raw: unknown): string | null {
 
 function findCol(headers: string[], ...terms: string[]): number {
   const h = headers.map((s) => String(s ?? "").toLowerCase().trim());
+  // Prefer exact match to avoid partial collisions (e.g. "set" hitting "superset")
+  const exact = h.findIndex((col) => terms.includes(col));
+  if (exact >= 0) return exact;
   return h.findIndex((col) => terms.some((t) => col.includes(t)));
 }
 
@@ -153,6 +156,26 @@ export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState("");
 
+  async function downloadTemplate() {
+    const XLSX = await import("xlsx");
+    const wb = XLSX.utils.book_new();
+    const headers = ["Date", "Workout", "Superset", "Exercise", "Sets", "Reps", "Load", "Type", "Tempo", "Rest", "Notes"];
+    const sample = ["2026-06-01", "Morning Lift", "", "Back Squat", 4, "5", 185, "absolute", "", 180, ""];
+
+    const sheetNames = athletes.length > 0
+      ? athletes.map((a) => a.full_name)
+      : ["Athlete Name"];
+
+    for (const name of sheetNames) {
+      const ws = XLSX.utils.aoa_to_sheet([headers, sample]);
+      // Column widths
+      ws["!cols"] = [12, 16, 10, 20, 6, 8, 8, 10, 8, 6, 20].map((w) => ({ wch: w }));
+      XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31)); // Excel sheet name max 31 chars
+    }
+
+    XLSX.writeFile(wb, "program-template.xlsx");
+  }
+
   async function parseFile(file: File) {
     const XLSX = await import("xlsx");
     const buffer = await file.arrayBuffer();
@@ -173,34 +196,32 @@ export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setImporting(false); return; }
 
-    // Fetch exercise library for name matching
-    let allExercises: { id: string; name: string }[] = [];
     const { data: exData } = await supabase.from("exercises").select("id, name");
-    allExercises = exData ?? [];
+    let allExercises: { id: string; name: string }[] = exData ?? [];
 
-    // Collect all unique workouts across all sheets
-    const workoutKeySet = new Set<string>();
+    // ── Step 1: Build the union of all workouts across every sheet ──────────
+    // workoutMap: `${date}||${title}` → ordered list of unique exercises (first occurrence = base)
+    const workoutMap = new Map<string, SheetExercise[]>();
     for (const sheet of program.sheets) {
       for (const row of sheet.rows) {
-        workoutKeySet.add(`${row.date}||${row.workoutTitle}`);
+        const key = `${row.date}||${row.workoutTitle}`;
+        if (!workoutMap.has(key)) workoutMap.set(key, []);
+        const existing = workoutMap.get(key)!;
+        const nameLower = row.exerciseName.toLowerCase();
+        if (!existing.some((e) => e.exerciseName.toLowerCase() === nameLower)) {
+          existing.push(row); // first occurrence becomes the base prescription
+        }
       }
     }
 
-    // Create workouts and base exercises from the FIRST sheet
-    // weIndex: `${date}||${exerciseName_lower}` -> workout_exercise_id
+    // ── Step 2: Create workouts + base workout_exercises ────────────────────
+    // weIndex: `${date}||${exerciseName_lower}` → workout_exercise_id
     const weIndex = new Map<string, string>();
-    const firstSheet = program.sheets[0];
 
-    // Group first sheet rows by workout
-    const workoutGroups = new Map<string, SheetExercise[]>();
-    for (const row of firstSheet.rows) {
-      const key = `${row.date}||${row.workoutTitle}`;
-      if (!workoutGroups.has(key)) workoutGroups.set(key, []);
-      workoutGroups.get(key)!.push(row);
-    }
-
-    for (const [key, exercises] of workoutGroups) {
-      const [date, title] = key.split("||");
+    for (const [key, baseExercises] of workoutMap) {
+      const splitAt = key.indexOf("||");
+      const date = key.slice(0, splitAt);
+      const title = key.slice(splitAt + 2);
       setProgress(`Creating "${title}" (${date})…`);
 
       const { data: w } = await supabase
@@ -208,13 +229,11 @@ export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
         .insert({ calendar_id: calendarId, date, title })
         .select("id")
         .single();
-
       if (!w) continue;
 
-      for (let i = 0; i < exercises.length; i++) {
-        const ex = exercises[i];
+      for (let i = 0; i < baseExercises.length; i++) {
+        const ex = baseExercises[i];
 
-        // Find or create exercise
         let match = allExercises.find((e) => e.name.toLowerCase() === ex.exerciseName.toLowerCase());
         if (!match) match = allExercises.find((e) =>
           e.name.toLowerCase().includes(ex.exerciseName.toLowerCase()) ||
@@ -250,58 +269,7 @@ export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
       }
     }
 
-    // For workouts that exist in other sheets but not in the first sheet, create them too
-    for (const sheet of program.sheets.slice(1)) {
-      const extraGroups = new Map<string, SheetExercise[]>();
-      for (const row of sheet.rows) {
-        const key = `${row.date}||${row.workoutTitle}`;
-        if (!workoutGroups.has(key)) {
-          if (!extraGroups.has(key)) extraGroups.set(key, []);
-          extraGroups.get(key)!.push(row);
-        }
-      }
-
-      for (const [key, exercises] of extraGroups) {
-        const [date, title] = key.split("||");
-        const { data: w } = await supabase
-          .from("workouts")
-          .insert({ calendar_id: calendarId, date, title })
-          .select("id").single();
-
-        if (!w) continue;
-
-        for (let i = 0; i < exercises.length; i++) {
-          const ex = exercises[i];
-          let match = allExercises.find((e) => e.name.toLowerCase() === ex.exerciseName.toLowerCase());
-          if (!match) match = allExercises.find((e) =>
-            e.name.toLowerCase().includes(ex.exerciseName.toLowerCase()) ||
-            ex.exerciseName.toLowerCase().includes(e.name.toLowerCase())
-          );
-          if (!match) {
-            const { data: created } = await supabase
-              .from("exercises")
-              .insert({ name: ex.exerciseName, is_public: false, created_by: user.id })
-              .select("id, name").single();
-            if (created) { match = created; allExercises.push(created); }
-          }
-          if (!match) continue;
-
-          const { data: we } = await supabase
-            .from("workout_exercises")
-            .insert({
-              workout_id: w.id, exercise_id: match.id, sort_order: i,
-              sets: ex.sets, reps: ex.reps, load: ex.load, load_type: ex.loadType,
-              tempo: ex.tempo, rest_seconds: ex.restSeconds, notes: ex.notes,
-              superset_group: ex.supersetGroup,
-            })
-            .select("id").single();
-
-          if (we) weIndex.set(`${date}||${ex.exerciseName.toLowerCase()}`, we.id);
-        }
-      }
-    }
-
-    // Apply athlete overrides for ALL sheets that have an athlete match
+    // ── Step 3: Create per-athlete overrides from every matched sheet ────────
     for (const sheet of program.sheets) {
       if (!sheet.athleteId) continue;
       setProgress(`Applying overrides for ${sheet.sheetName}…`);
@@ -317,6 +285,8 @@ export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
             sets: row.sets,
             reps: row.reps,
             load: row.load,
+            load_type: row.loadType,
+            notes: row.notes,
           },
           { onConflict: "workout_exercise_id,athlete_id" }
         );
@@ -338,29 +308,40 @@ export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
 
   return (
     <>
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) parseFile(f); }}
-        onClick={() => inputRef.current?.click()}
-        className={`border-2 border-dashed rounded-lg p-5 text-center cursor-pointer transition-colors ${
-          dragging ? "border-primary bg-primary/5" : "border-muted-foreground/25 hover:border-muted-foreground/50 hover:bg-muted/30"
-        }`}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".xlsx,.xls"
-          className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) parseFile(f); e.target.value = ""; }}
-        />
-        <FileSpreadsheet className={`h-7 w-7 mx-auto mb-2 ${dragging ? "text-primary" : "text-muted-foreground"}`} />
-        <p className="text-sm font-medium">Import program from Excel</p>
-        <p className="text-xs text-muted-foreground mt-1">
-          One sheet per athlete — sheet name must match athlete name
-          <br />
-          Columns: Date · Workout · Superset · Exercise · Sets · Reps · Load · Type · Tempo · Notes
-        </p>
+      <div className="space-y-2">
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) parseFile(f); }}
+          onClick={() => inputRef.current?.click()}
+          className={`border-2 border-dashed rounded-lg p-5 text-center cursor-pointer transition-colors ${
+            dragging ? "border-primary bg-primary/5" : "border-muted-foreground/25 hover:border-muted-foreground/50 hover:bg-muted/30"
+          }`}
+        >
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) parseFile(f); e.target.value = ""; }}
+          />
+          <FileSpreadsheet className={`h-7 w-7 mx-auto mb-2 ${dragging ? "text-primary" : "text-muted-foreground"}`} />
+          <p className="text-sm font-medium">Import program from Excel</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            One sheet per athlete — sheet name must match athlete name
+            <br />
+            Columns: Date · Workout · Superset · Exercise · Sets · Reps · Load · Type · Tempo · Notes
+          </p>
+        </div>
+
+        <button
+          onClick={downloadTemplate}
+          className="w-full flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Download template
+          {athletes.length > 0 && ` (${athletes.length} athlete sheet${athletes.length !== 1 ? "s" : ""})`}
+        </button>
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={(o) => !importing && setDialogOpen(o)}>
@@ -415,7 +396,7 @@ export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
             </div>
 
             <p className="text-xs text-muted-foreground">
-              The first sheet sets the base prescription. All matched sheets generate per-athlete overrides.
+              Each sheet creates workouts. Sheets whose names match an athlete generate per-athlete load overrides — athletes without a sheet see the base prescription.
             </p>
 
             {importing && progress && (

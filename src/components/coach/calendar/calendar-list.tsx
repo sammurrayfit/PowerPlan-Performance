@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, CalendarDays, Trash2, Users, User } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Plus, CalendarDays, Trash2, Users, User, Settings2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/supabase/types";
 
@@ -22,6 +22,72 @@ interface CalendarListProps {
   calendars: Calendar[];
   teams: Team[];
   coachId: string;
+}
+
+function AssignTeamDialog({
+  calendar,
+  teams,
+  onSaved,
+}: {
+  calendar: Calendar;
+  teams: Team[];
+  onSaved: (calendarId: string, teamId: string | null) => void;
+}) {
+  const supabase = createClient();
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState(calendar.team_id ?? "");
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    setSaving(true);
+    const { error } = await supabase
+      .from("calendars")
+      .update({ team_id: selected || null })
+      .eq("id", calendar.id);
+    if (error) { alert(error.message); setSaving(false); return; }
+    onSaved(calendar.id, selected || null);
+    setOpen(false);
+    setSaving(false);
+  }
+
+  return (
+    <>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(true); }}
+        className="opacity-0 group-hover:opacity-100 p-1.5 rounded hover:bg-muted transition-all"
+        title="Assign team"
+      >
+        <Settings2 className="h-4 w-4 text-muted-foreground" />
+      </button>
+      <Dialog open={open} onOpenChange={(o) => !saving && setOpen(o)}>
+        <DialogContent className="sm:max-w-sm" onClick={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle>Assign team — {calendar.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1.5 mt-2">
+            <Label>Team</Label>
+            <select
+              className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+              value={selected}
+              onChange={(e) => setSelected(e.target.value)}
+            >
+              <option value="">No team (general calendar)</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground pt-1">
+              Athletes in the selected team will see this calendar's workouts.
+            </p>
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={saving}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 
 export function CalendarList({ calendars: initialCalendars, teams, coachId }: CalendarListProps) {
@@ -72,6 +138,12 @@ export function CalendarList({ calendars: initialCalendars, teams, coachId }: Ca
     const { error } = await supabase.from("calendars").delete().eq("id", id);
     if (!error) setCalendarList((prev) => prev.filter((c) => c.id !== id));
     setDeleting(null);
+  }
+
+  function handleTeamAssigned(calendarId: string, newTeamId: string | null) {
+    setCalendarList((prev) =>
+      prev.map((c) => c.id === calendarId ? { ...c, team_id: newTeamId } : c)
+    );
   }
 
   return (
@@ -177,6 +249,13 @@ export function CalendarList({ calendars: initialCalendars, teams, coachId }: Ca
                   )}
                 </p>
               </div>
+              {teams.length > 0 && (
+                <AssignTeamDialog
+                  calendar={cal}
+                  teams={teams}
+                  onSaved={handleTeamAssigned}
+                />
+              )}
               <button
                 onClick={(e) => handleDelete(e, cal.id)}
                 disabled={deleting === cal.id}

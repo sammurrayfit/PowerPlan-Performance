@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,25 +23,24 @@ export default async function AthleteDashboard() {
   let todayWorkouts: WorkoutRow[] = [];
   let calendarMap: Record<string, CalendarRow> = {};
 
-  if (teamIds.length > 0) {
-    const { data: calendarRows } = await supabase
-      .from("calendars")
+  // Calendars via team membership OR directly assigned to this athlete
+  const calQuery = supabase.from("calendars").select("*");
+  const conditions = [`athlete_id.eq.${user.id}`];
+  if (teamIds.length > 0) conditions.push(`team_id.in.(${teamIds.join(",")})`);
+  const { data: calendarRows } = await calQuery.or(conditions.join(","));
+
+  const calendars = calendarRows ?? [];
+  calendarMap = Object.fromEntries(calendars.map((c) => [c.id, c]));
+  const calendarIds = calendars.map((c) => c.id);
+
+  if (calendarIds.length > 0) {
+    const { data } = await supabase
+      .from("workouts")
       .select("*")
-      .in("team_id", teamIds);
-
-    const calendars = calendarRows ?? [];
-    calendarMap = Object.fromEntries(calendars.map((c) => [c.id, c]));
-    const calendarIds = calendars.map((c) => c.id);
-
-    if (calendarIds.length > 0) {
-      const { data } = await supabase
-        .from("workouts")
-        .select("*")
-        .eq("date", today)
-        .in("calendar_id", calendarIds)
-        .order("created_at");
-      todayWorkouts = data ?? [];
-    }
+      .eq("date", today)
+      .in("calendar_id", calendarIds)
+      .order("created_at");
+    todayWorkouts = data ?? [];
   }
 
   return (
@@ -55,22 +55,24 @@ export default async function AthleteDashboard() {
       {todayWorkouts.length > 0 ? (
         <div className="space-y-3">
           {todayWorkouts.map((workout) => (
-            <Card key={workout.id} className="cursor-pointer hover:bg-accent/50 transition-colors">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">{workout.title}</CardTitle>
-                  {workout.is_locked && <Badge variant="secondary">Locked</Badge>}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {calendarMap[workout.calendar_id]?.name}
-                </p>
-              </CardHeader>
-              {workout.notes && (
-                <CardContent className="pt-0">
-                  <p className="text-sm text-muted-foreground">{workout.notes}</p>
-                </CardContent>
-              )}
-            </Card>
+            <Link key={workout.id} href={`/athlete/workout/${workout.id}`}>
+              <Card className="cursor-pointer hover:bg-accent/50 transition-colors">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">{workout.title}</CardTitle>
+                    {workout.is_locked && <Badge variant="secondary">Locked</Badge>}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {calendarMap[workout.calendar_id]?.name}
+                  </p>
+                </CardHeader>
+                {workout.notes && (
+                  <CardContent className="pt-0">
+                    <p className="text-sm text-muted-foreground">{workout.notes}</p>
+                  </CardContent>
+                )}
+              </Card>
+            </Link>
           ))}
         </div>
       ) : (

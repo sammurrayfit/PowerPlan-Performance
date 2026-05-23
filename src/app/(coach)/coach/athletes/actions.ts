@@ -84,6 +84,38 @@ export async function deleteMax(maxId: string, athleteId: string) {
   revalidatePath(`/coach/athletes/${athleteId}`);
 }
 
+export async function createTeam(name: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  const { data, error } = await supabase
+    .from("teams")
+    .insert({ name, coach_id: user.id })
+    .select("id, name")
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "Failed to create team");
+  revalidatePath("/coach/athletes");
+  return data;
+}
+
+export async function sendPasswordReset(athleteId: string) {
+  const admin = adminClient();
+  const { data: userData } = await admin.auth.admin.getUserById(athleteId);
+  if (!userData.user?.email) throw new Error("Athlete email not found");
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const { error } = await admin.auth.admin.generateLink({
+    type: "recovery",
+    email: userData.user.email,
+    options: { redirectTo: `${siteUrl}/invite/setup` },
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function assignCalendarToAthlete(calendarId: string, athleteId: string | null) {
+  const supabase = await createClient();
+  await supabase.from("calendars").update({ athlete_id: athleteId }).eq("id", calendarId);
+}
+
 export async function goToAthleteProfile(athleteId: string) {
   redirect(`/coach/athletes/${athleteId}`);
 }
