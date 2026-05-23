@@ -60,3 +60,69 @@ export async function deleteWorkout(id: string, calendarId: string) {
   await supabase.from("workouts").delete().eq("id", id);
   redirect(`/coach/calendar/${calendarId}`);
 }
+
+export async function copyWorkout(workoutId: string, targetDates: string[]) {
+  const supabase = await createClient();
+
+  const [{ data: workout }, { data: workoutExercises }] = await Promise.all([
+    supabase.from("workouts").select("calendar_id, title, notes").eq("id", workoutId).single(),
+    supabase.from("workout_exercises").select("*").eq("workout_id", workoutId).order("sort_order"),
+  ]);
+
+  if (!workout) return;
+
+  for (const date of targetDates) {
+    const { data: newWorkout } = await supabase
+      .from("workouts")
+      .insert({ calendar_id: workout.calendar_id, date, title: workout.title, notes: workout.notes })
+      .select("id")
+      .single();
+
+    if (newWorkout && workoutExercises?.length) {
+      await supabase.from("workout_exercises").insert(
+        workoutExercises.map((we) => ({
+          workout_id: newWorkout.id,
+          exercise_id: we.exercise_id,
+          sort_order: we.sort_order,
+          sets: we.sets,
+          reps: we.reps,
+          load: we.load,
+          load_type: we.load_type,
+          tempo: we.tempo,
+          rest_seconds: we.rest_seconds,
+          notes: we.notes,
+          is_pr_tracking: we.is_pr_tracking,
+        }))
+      );
+    }
+  }
+
+  revalidatePath(`/coach/calendar/${workout.calendar_id}`);
+}
+
+export async function upsertOverride(
+  workoutExerciseId: string,
+  athleteId: string,
+  data: {
+    sets?: number | null;
+    reps?: string | null;
+    load?: number | null;
+    load_type?: "absolute" | "percent_1rm" | "bodyweight" | null;
+    notes?: string | null;
+  }
+) {
+  const supabase = await createClient();
+  await supabase.from("athlete_exercise_overrides").upsert(
+    { workout_exercise_id: workoutExerciseId, athlete_id: athleteId, ...data },
+    { onConflict: "workout_exercise_id,athlete_id" }
+  );
+}
+
+export async function deleteOverride(workoutExerciseId: string, athleteId: string) {
+  const supabase = await createClient();
+  await supabase
+    .from("athlete_exercise_overrides")
+    .delete()
+    .eq("workout_exercise_id", workoutExerciseId)
+    .eq("athlete_id", athleteId);
+}

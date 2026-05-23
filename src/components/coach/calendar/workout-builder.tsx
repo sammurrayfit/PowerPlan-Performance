@@ -28,6 +28,8 @@ import { createClient } from "@/lib/supabase/client";
 import { updateWorkout, deleteWorkout } from "@/app/(coach)/coach/calendar/actions";
 import { ExercisePicker } from "./exercise-picker";
 import { ExcelImport, type ParsedExerciseRow } from "./excel-import";
+import { CopyWorkoutModal } from "./copy-workout-modal";
+import { Individualization } from "./individualization";
 import type { Database } from "@/lib/supabase/types";
 
 type Workout = Database["public"]["Tables"]["workouts"]["Row"];
@@ -53,11 +55,29 @@ interface AllExercise {
   muscle_groups: string[];
 }
 
+interface Athlete {
+  id: string;
+  full_name: string;
+}
+
+interface Override {
+  id: string;
+  workout_exercise_id: string;
+  athlete_id: string;
+  sets: number | null;
+  reps: string | null;
+  load: number | null;
+  load_type: "absolute" | "percent_1rm" | "bodyweight" | null;
+  notes: string | null;
+}
+
 interface WorkoutBuilderProps {
   workout: Workout;
   initialExercises: WorkoutExerciseRow[];
   allExercises: AllExercise[];
   calendarId: string;
+  athletes?: Athlete[];
+  initialOverrides?: Override[];
 }
 
 const LOAD_TYPE_LABELS = { absolute: "lbs", percent_1rm: "%", bodyweight: "BW" };
@@ -180,13 +200,16 @@ function ExerciseRow({
   );
 }
 
-export function WorkoutBuilder({ workout, initialExercises, allExercises, calendarId }: WorkoutBuilderProps) {
+type Tab = "prescription" | "individualize";
+
+export function WorkoutBuilder({ workout, initialExercises, allExercises, calendarId, athletes = [], initialOverrides = [] }: WorkoutBuilderProps) {
   const supabase = createClient();
   const [exercises, setExercises] = useState<WorkoutExerciseRow[]>(initialExercises);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isLocked, setIsLocked] = useState(workout.is_locked);
   const [title, setTitle] = useState(workout.title);
   const [notes, setNotes] = useState(workout.notes ?? "");
+  const [activeTab, setActiveTab] = useState<Tab>("prescription");
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -263,12 +286,10 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
     const newRows: WorkoutExerciseRow[] = [];
 
     for (const row of rows) {
-      // Match exercise by name (case-insensitive)
       let match = allExercises.find(
         (e) => e.name.toLowerCase() === row.exerciseName.toLowerCase()
       );
 
-      // Partial match fallback
       if (!match) {
         match = allExercises.find(
           (e) =>
@@ -277,7 +298,6 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
         );
       }
 
-      // Auto-create if still not found
       if (!match) {
         const { data: created } = await supabase
           .from("exercises")
@@ -286,7 +306,6 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
           .single();
         if (created) {
           match = created;
-          // Add to local allExercises so subsequent rows can match it
           allExercises.push(created);
         }
       }
@@ -352,6 +371,16 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
     await deleteWorkout(workout.id, calendarId);
   }
 
+  // Exercises shaped for the Individualization component
+  const individualizationExercises = exercises.map((e) => ({
+    id: e.id,
+    exercise_name: e.exercise_name,
+    sets: e.sets,
+    reps: e.reps,
+    load: e.load,
+    load_type: e.load_type,
+  }));
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -369,6 +398,7 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
           <p className="text-sm text-muted-foreground">{workout.date}</p>
         </div>
         <div className="flex items-center gap-2 pt-6">
+          <CopyWorkoutModal workoutId={workout.id} workoutTitle={title} />
           <Button variant="outline" size="sm" onClick={toggleLock}>
             {isLocked ? <><Unlock className="h-4 w-4 mr-1.5" /> Unlock</> : <><Lock className="h-4 w-4 mr-1.5" /> Lock</>}
           </Button>
@@ -388,55 +418,96 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
         className="resize-none"
       />
 
-      {/* Exercise table */}
-      <div className="rounded-lg border overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-xs text-muted-foreground uppercase tracking-wide">
-            <tr>
-              <th className="w-8" />
-              <th className="px-2 py-2 text-left">Exercise</th>
-              <th className="px-2 py-2 text-left w-16">Sets</th>
-              <th className="px-2 py-2 text-left w-20">Reps</th>
-              <th className="px-2 py-2 text-left w-20">Load</th>
-              <th className="px-2 py-2 text-left w-20">Type</th>
-              <th className="px-2 py-2 text-left w-20">Tempo</th>
-              <th className="px-2 py-2 text-left w-16">Rest</th>
-              <th className="px-2 py-2 text-left">Notes</th>
-              <th className="px-2 py-2 w-10" title="PR Tracking">PR</th>
-              <th className="w-10" />
-            </tr>
-          </thead>
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={exercises.map((e) => e.id)} strategy={verticalListSortingStrategy}>
-              <tbody>
-                {exercises.map((row) => (
-                  <ExerciseRow
-                    key={row.id}
-                    row={row}
-                    onUpdate={handleUpdate}
-                    onDelete={handleDelete}
-                  />
-                ))}
-              </tbody>
-            </SortableContext>
-          </DndContext>
-        </table>
+      {/* Tabs */}
+      <div className="flex border-b">
+        <button
+          onClick={() => setActiveTab("prescription")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "prescription"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Prescription
+        </button>
+        <button
+          onClick={() => setActiveTab("individualize")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "individualize"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Individualize
+          {athletes.length > 0 && (
+            <span className="ml-1.5 text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">
+              {athletes.length}
+            </span>
+          )}
+        </button>
+      </div>
 
-        {exercises.length === 0 && (
-          <div className="text-center py-12 text-muted-foreground text-sm">
-            No exercises yet — add one below.
+      {activeTab === "prescription" && (
+        <>
+          {/* Exercise table */}
+          <div className="rounded-lg border overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-xs text-muted-foreground uppercase tracking-wide">
+                <tr>
+                  <th className="w-8" />
+                  <th className="px-2 py-2 text-left">Exercise</th>
+                  <th className="px-2 py-2 text-left w-16">Sets</th>
+                  <th className="px-2 py-2 text-left w-20">Reps</th>
+                  <th className="px-2 py-2 text-left w-20">Load</th>
+                  <th className="px-2 py-2 text-left w-20">Type</th>
+                  <th className="px-2 py-2 text-left w-20">Tempo</th>
+                  <th className="px-2 py-2 text-left w-16">Rest</th>
+                  <th className="px-2 py-2 text-left">Notes</th>
+                  <th className="px-2 py-2 w-10" title="PR Tracking">PR</th>
+                  <th className="w-10" />
+                </tr>
+              </thead>
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <SortableContext items={exercises.map((e) => e.id)} strategy={verticalListSortingStrategy}>
+                  <tbody>
+                    {exercises.map((row) => (
+                      <ExerciseRow
+                        key={row.id}
+                        row={row}
+                        onUpdate={handleUpdate}
+                        onDelete={handleDelete}
+                      />
+                    ))}
+                  </tbody>
+                </SortableContext>
+              </DndContext>
+            </table>
+
+            {exercises.length === 0 && (
+              <div className="text-center py-12 text-muted-foreground text-sm">
+                No exercises yet — add one below.
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      <div className="flex items-center gap-3">
-        <Button onClick={() => setPickerOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add exercise
-        </Button>
-      </div>
+          <div className="flex items-center gap-3">
+            <Button onClick={() => setPickerOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add exercise
+            </Button>
+          </div>
 
-      <ExcelImport onImport={handleImportExcel} />
+          <ExcelImport onImport={handleImportExcel} />
+        </>
+      )}
+
+      {activeTab === "individualize" && (
+        <Individualization
+          exercises={individualizationExercises}
+          athletes={athletes}
+          initialOverrides={initialOverrides}
+        />
+      )}
 
       {/* Exercise picker sheet */}
       <Sheet open={pickerOpen} onOpenChange={setPickerOpen}>
