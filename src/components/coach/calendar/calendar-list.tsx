@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Plus, CalendarDays, Trash2, Users, User } from "lucide-react";
-import { createCalendar, deleteCalendar } from "@/app/(coach)/coach/calendar/actions";
+import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/supabase/types";
 
 type Calendar = Database["public"]["Tables"]["calendars"]["Row"];
@@ -24,24 +24,53 @@ interface CalendarListProps {
   coachId: string;
 }
 
-export function CalendarList({ calendars, teams, coachId }: CalendarListProps) {
+export function CalendarList({ calendars: initialCalendars, teams, coachId }: CalendarListProps) {
   const router = useRouter();
+  const supabase = createClient();
+  const [calendarList, setCalendarList] = useState<Calendar[]>(initialCalendars);
   const [open, setOpen] = useState(false);
   const [color, setColor] = useState(COLORS[0]);
+  const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [teamId, setTeamId] = useState("");
 
-  async function handleCreate(formData: FormData) {
-    formData.set("color", color);
-    await createCalendar(formData);
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setCreating(true);
+
+    const { data, error } = await supabase
+      .from("calendars")
+      .insert({
+        name: name.trim(),
+        color,
+        coach_id: coachId,
+        team_id: teamId || null,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      alert("Failed to create calendar: " + error.message);
+      setCreating(false);
+      return;
+    }
+
+    setCalendarList((prev) => [...prev, data]);
     setOpen(false);
+    setName("");
+    setTeamId("");
     setColor(COLORS[0]);
+    setCreating(false);
   }
 
   async function handleDelete(e: React.MouseEvent, id: string) {
     e.stopPropagation();
     if (!confirm("Delete this calendar and all its workouts?")) return;
     setDeleting(id);
-    await deleteCalendar(id);
+    const { error } = await supabase.from("calendars").delete().eq("id", id);
+    if (!error) setCalendarList((prev) => prev.filter((c) => c.id !== id));
     setDeleting(null);
   }
 
@@ -50,7 +79,7 @@ export function CalendarList({ calendars, teams, coachId }: CalendarListProps) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Calendars</h1>
-          <p className="text-muted-foreground text-sm">{calendars.length} calendar{calendars.length !== 1 ? "s" : ""}</p>
+          <p className="text-muted-foreground text-sm">{calendarList.length} calendar{calendarList.length !== 1 ? "s" : ""}</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger render={<Button />}>
@@ -61,10 +90,17 @@ export function CalendarList({ calendars, teams, coachId }: CalendarListProps) {
             <DialogHeader>
               <DialogTitle>New calendar</DialogTitle>
             </DialogHeader>
-            <form action={handleCreate} className="space-y-4 mt-2">
+            <form onSubmit={handleCreate} className="space-y-4 mt-2">
               <div className="space-y-1.5">
                 <Label htmlFor="name">Name</Label>
-                <Input id="name" name="name" placeholder="e.g. Team A — Spring 2026" required />
+                <Input
+                  id="name"
+                  placeholder="e.g. Team A — Spring 2026"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                  autoFocus
+                />
               </div>
 
               {teams.length > 0 && (
@@ -72,7 +108,8 @@ export function CalendarList({ calendars, teams, coachId }: CalendarListProps) {
                   <Label htmlFor="team_id">Team (optional)</Label>
                   <select
                     id="team_id"
-                    name="team_id"
+                    value={teamId}
+                    onChange={(e) => setTeamId(e.target.value)}
                     className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                   >
                     <option value="">No team</option>
@@ -102,13 +139,15 @@ export function CalendarList({ calendars, teams, coachId }: CalendarListProps) {
                 </div>
               </div>
 
-              <Button type="submit" className="w-full">Create calendar</Button>
+              <Button type="submit" className="w-full" disabled={creating}>
+                {creating ? "Creating…" : "Create calendar"}
+              </Button>
             </form>
           </DialogContent>
         </Dialog>
       </div>
 
-      {calendars.length === 0 ? (
+      {calendarList.length === 0 ? (
         <div className="text-center py-20 text-muted-foreground">
           <CalendarDays className="h-10 w-10 mx-auto mb-3 opacity-30" />
           <p className="font-medium">No calendars yet</p>
@@ -116,7 +155,7 @@ export function CalendarList({ calendars, teams, coachId }: CalendarListProps) {
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {calendars.map((cal) => (
+          {calendarList.map((cal) => (
             <div
               key={cal.id}
               onClick={() => router.push(`/coach/calendar/${cal.id}`)}

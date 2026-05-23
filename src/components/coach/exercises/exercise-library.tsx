@@ -42,9 +42,11 @@ export function ExerciseLibrary({ exercises, categories, userId }: ExerciseLibra
     return matchesSearch && matchesCategory && matchesMuscle;
   });
 
-  // Only show categories that have exercises
+  const HIDDEN_CATEGORIES = new Set(["Arms", "Back & Neck", "Core", "Full Body", "Legs"]);
+
+  // Only show categories that have exercises and aren't hidden
   const usedCategoryIds = new Set(exercises.map((e) => e.category_id).filter(Boolean));
-  const activeCategories = categories.filter((c) => usedCategoryIds.has(c.id));
+  const activeCategories = categories.filter((c) => usedCategoryIds.has(c.id) && !HIDDEN_CATEGORIES.has(c.name));
 
   return (
     <div className="space-y-6">
