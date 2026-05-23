@@ -19,14 +19,11 @@ interface ExerciseLibraryProps {
   userId: string;
 }
 
-const MUSCLE_GROUPS = [
-  "Chest",
-  "Anterior Deltoid", "Middle Deltoid", "Posterior Deltoid",
-  "Triceps", "Biceps", "Forearms",
-  "Back", "Latissimus Dorsi", "Trapezius", "Neck",
-  "Quads", "Hamstrings", "Glutes", "Adductors", "Abductors", "Calves", "Anterior Tibialis",
-  "Rectus Abdominis", "Lower Core", "Obliques", "Lower Back",
-  "Full Body",
+const MUSCLE_GROUP_SECTIONS = [
+  { label: "Chest & Shoulders", muscles: ["Chest", "Anterior Deltoid", "Middle Deltoid", "Posterior Deltoid"] },
+  { label: "Arms & Back", muscles: ["Triceps", "Biceps", "Forearms", "Back", "Latissimus Dorsi", "Trapezius", "Neck"] },
+  { label: "Lower Body", muscles: ["Quads", "Hamstrings", "Glutes", "Adductors", "Abductors", "Calves", "Anterior Tibialis"] },
+  { label: "Core", muscles: ["Rectus Abdominis", "Lower Core", "Obliques", "Lower Back"] },
 ];
 
 export function ExerciseLibrary({ exercises, categories, userId }: ExerciseLibraryProps) {
@@ -111,27 +108,32 @@ export function ExerciseLibrary({ exercises, categories, userId }: ExerciseLibra
       )}
 
       {/* Muscle group filter */}
-      <div className="space-y-1">
-        <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Muscle group</p>
-        <div className="flex flex-wrap gap-2">
-          <Badge
-            variant={activeMuscle === null ? "default" : "outline"}
-            className="cursor-pointer"
-            onClick={() => setActiveMuscle(null)}
-          >
-            All
-          </Badge>
-          {MUSCLE_GROUPS.map((m) => (
-            <Badge
-              key={m}
-              variant={activeMuscle === m ? "default" : "outline"}
-              className="cursor-pointer"
-              onClick={() => setActiveMuscle(activeMuscle === m ? null : m)}
-            >
-              {m}
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Muscle group</p>
+          {activeMuscle && (
+            <Badge variant="outline" className="cursor-pointer text-xs" onClick={() => setActiveMuscle(null)}>
+              Clear
             </Badge>
-          ))}
+          )}
         </div>
+        {MUSCLE_GROUP_SECTIONS.map((section) => (
+          <div key={section.label} className="space-y-1">
+            <p className="text-xs text-muted-foreground">{section.label}</p>
+            <div className="flex flex-wrap gap-2">
+              {section.muscles.map((m) => (
+                <Badge
+                  key={m}
+                  variant={activeMuscle === m ? "default" : "outline"}
+                  className="cursor-pointer"
+                  onClick={() => setActiveMuscle(activeMuscle === m ? null : m)}
+                >
+                  {m}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Grid */}
