@@ -1,8 +1,28 @@
-export default function ExercisesPage() {
+import { createClient } from "@/lib/supabase/server";
+import { ExerciseLibrary } from "@/components/coach/exercises/exercise-library";
+
+export default async function ExercisesPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const [{ data: exercises }, { data: categories }] = await Promise.all([
+    supabase
+      .from("exercises")
+      .select("*")
+      .or(`created_by.eq.${user.id},is_public.eq.true`)
+      .order("name"),
+    supabase
+      .from("exercise_categories")
+      .select("*")
+      .order("name"),
+  ]);
+
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Exercise Library</h1>
-      <p className="text-muted-foreground">Coming soon — Phase 2.</p>
-    </div>
+    <ExerciseLibrary
+      exercises={exercises ?? []}
+      categories={categories ?? []}
+      userId={user.id}
+    />
   );
 }
