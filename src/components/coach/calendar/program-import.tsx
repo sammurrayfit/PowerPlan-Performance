@@ -1,0 +1,436 @@
+"use client";
+
+import { useState, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { FileSpreadsheet, AlertTriangle } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+
+interface Athlete {
+  id: string;
+  full_name: string;
+}
+
+interface SheetExercise {
+  date: string;
+  workoutTitle: string;
+  supersetGroup: string | null;
+  exerciseName: string;
+  sets: number | null;
+  reps: string | null;
+  load: number | null;
+  loadType: "absolute" | "percent_1rm" | "bodyweight";
+  tempo: string | null;
+  restSeconds: number | null;
+  notes: string | null;
+}
+
+interface AthleteSheet {
+  sheetName: string;
+  athleteId: string | null;
+  rows: SheetExercise[];
+}
+
+interface ParsedProgram {
+  sheets: AthleteSheet[];
+  warnings: string[];
+}
+
+function parseLoadType(raw: string): "absolute" | "percent_1rm" | "bodyweight" {
+  const v = raw.toLowerCase();
+  if (v.includes("%") || v.includes("percent") || v.includes("1rm")) return "percent_1rm";
+  if (v.includes("bw") || v.includes("body")) return "bodyweight";
+  return "absolute";
+}
+
+function toDateStr(raw: unknown): string | null {
+  if (!raw) return null;
+  if (typeof raw === "number") {
+    const date = new Date(Math.round((raw - 25569) * 86400 * 1000));
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(date.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  const s = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const parts = s.split("/");
+  if (parts.length === 3) {
+    const [m, d, y] = parts;
+    return `${y.padStart(4, "20")}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+  return null;
+}
+
+function findCol(headers: string[], ...terms: string[]): number {
+  const h = headers.map((s) => String(s ?? "").toLowerCase().trim());
+  return h.findIndex((col) => terms.some((t) => col.includes(t)));
+}
+
+function parseProgram(workbook: import("xlsx").WorkBook, athletes: Athlete[]): ParsedProgram {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const XLSX = require("xlsx");
+  const warnings: string[] = [];
+  const sheets: AthleteSheet[] = [];
+
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    if (rows.length < 2) continue;
+
+    const h = rows[0] as string[];
+    const col = {
+      date:      findCol(h, "date"),
+      workout:   findCol(h, "workout", "title", "session"),
+      superset:  findCol(h, "superset", "ss", "group"),
+      exercise:  findCol(h, "exercise", "movement", "lift", "drill"),
+      sets:      findCol(h, "sets", "set"),
+      reps:      findCol(h, "reps", "rep"),
+      load:      findCol(h, "load", "weight", "lbs", "kg", "intensity"),
+      loadType:  findCol(h, "load type", "type", "unit"),
+      tempo:     findCol(h, "tempo"),
+      rest:      findCol(h, "rest"),
+      notes:     findCol(h, "notes", "note", "cue", "coaching"),
+    };
+
+    if (col.date < 0 || col.exercise < 0) {
+      warnings.push(`Sheet "${sheetName}" skipped — missing Date or Exercise column.`);
+      continue;
+    }
+
+    // Match sheet name to athlete
+    const athlete = athletes.find(
+      (a) => a.full_name.toLowerCase() === sheetName.toLowerCase()
+    );
+    if (!athlete) warnings.push(`Athlete not found for sheet "${sheetName}" — overrides will be skipped.`);
+
+    const sheetRows: SheetExercise[] = [];
+    for (const row of rows.slice(1) as unknown[][]) {
+      const dateStr = toDateStr(row[col.date]);
+      const exerciseName = String(row[col.exercise] ?? "").trim();
+      if (!dateStr || !exerciseName) continue;
+
+      const workoutTitle = col.workout >= 0 ? String(row[col.workout] ?? "").trim() || `Workout ${dateStr}` : `Workout ${dateStr}`;
+      const loadTypeRaw = col.loadType >= 0 ? String(row[col.loadType] ?? "") : "";
+      const supersetRaw = col.superset >= 0 ? String(row[col.superset] ?? "").trim().toUpperCase() : "";
+
+      sheetRows.push({
+        date: dateStr,
+        workoutTitle,
+        supersetGroup: supersetRaw || null,
+        exerciseName,
+        sets:        col.sets >= 0 && row[col.sets] !== "" ? Number(row[col.sets]) || null : null,
+        reps:        col.reps >= 0 ? String(row[col.reps] ?? "").trim() || null : null,
+        load:        col.load >= 0 && row[col.load] !== "" ? Number(row[col.load]) || null : null,
+        loadType:    parseLoadType(loadTypeRaw),
+        tempo:       col.tempo >= 0 ? String(row[col.tempo] ?? "").trim() || null : null,
+        restSeconds: col.rest >= 0 && row[col.rest] !== "" ? Number(row[col.rest]) || null : null,
+        notes:       col.notes >= 0 ? String(row[col.notes] ?? "").trim() || null : null,
+      });
+    }
+
+    if (sheetRows.length > 0) {
+      sheets.push({ sheetName, athleteId: athlete?.id ?? null, rows: sheetRows });
+    }
+  }
+
+  return { sheets, warnings };
+}
+
+interface ProgramImportProps {
+  calendarId: string;
+  athletes: Athlete[];
+}
+
+export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
+  const router = useRouter();
+  const supabase = createClient();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [program, setProgram] = useState<ParsedProgram | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [progress, setProgress] = useState("");
+
+  async function parseFile(file: File) {
+    const XLSX = await import("xlsx");
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array", cellDates: false });
+    const parsed = parseProgram(workbook, athletes);
+    if (parsed.sheets.length === 0) {
+      alert("No data found. Make sure each sheet has Date and Exercise columns.");
+      return;
+    }
+    setProgram(parsed);
+    setDialogOpen(true);
+  }
+
+  async function handleImport() {
+    if (!program) return;
+    setImporting(true);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setImporting(false); return; }
+
+    // Fetch exercise library for name matching
+    let allExercises: { id: string; name: string }[] = [];
+    const { data: exData } = await supabase.from("exercises").select("id, name");
+    allExercises = exData ?? [];
+
+    // Collect all unique workouts across all sheets
+    const workoutKeySet = new Set<string>();
+    for (const sheet of program.sheets) {
+      for (const row of sheet.rows) {
+        workoutKeySet.add(`${row.date}||${row.workoutTitle}`);
+      }
+    }
+
+    // Create workouts and base exercises from the FIRST sheet
+    // weIndex: `${date}||${exerciseName_lower}` -> workout_exercise_id
+    const weIndex = new Map<string, string>();
+    const firstSheet = program.sheets[0];
+
+    // Group first sheet rows by workout
+    const workoutGroups = new Map<string, SheetExercise[]>();
+    for (const row of firstSheet.rows) {
+      const key = `${row.date}||${row.workoutTitle}`;
+      if (!workoutGroups.has(key)) workoutGroups.set(key, []);
+      workoutGroups.get(key)!.push(row);
+    }
+
+    for (const [key, exercises] of workoutGroups) {
+      const [date, title] = key.split("||");
+      setProgress(`Creating "${title}" (${date})…`);
+
+      const { data: w } = await supabase
+        .from("workouts")
+        .insert({ calendar_id: calendarId, date, title })
+        .select("id")
+        .single();
+
+      if (!w) continue;
+
+      for (let i = 0; i < exercises.length; i++) {
+        const ex = exercises[i];
+
+        // Find or create exercise
+        let match = allExercises.find((e) => e.name.toLowerCase() === ex.exerciseName.toLowerCase());
+        if (!match) match = allExercises.find((e) =>
+          e.name.toLowerCase().includes(ex.exerciseName.toLowerCase()) ||
+          ex.exerciseName.toLowerCase().includes(e.name.toLowerCase())
+        );
+        if (!match) {
+          const { data: created } = await supabase
+            .from("exercises")
+            .insert({ name: ex.exerciseName, is_public: false, created_by: user.id })
+            .select("id, name").single();
+          if (created) { match = created; allExercises.push(created); }
+        }
+        if (!match) continue;
+
+        const { data: we } = await supabase
+          .from("workout_exercises")
+          .insert({
+            workout_id: w.id,
+            exercise_id: match.id,
+            sort_order: i,
+            sets: ex.sets,
+            reps: ex.reps,
+            load: ex.load,
+            load_type: ex.loadType,
+            tempo: ex.tempo,
+            rest_seconds: ex.restSeconds,
+            notes: ex.notes,
+            superset_group: ex.supersetGroup,
+          })
+          .select("id").single();
+
+        if (we) weIndex.set(`${date}||${ex.exerciseName.toLowerCase()}`, we.id);
+      }
+    }
+
+    // For workouts that exist in other sheets but not in the first sheet, create them too
+    for (const sheet of program.sheets.slice(1)) {
+      const extraGroups = new Map<string, SheetExercise[]>();
+      for (const row of sheet.rows) {
+        const key = `${row.date}||${row.workoutTitle}`;
+        if (!workoutGroups.has(key)) {
+          if (!extraGroups.has(key)) extraGroups.set(key, []);
+          extraGroups.get(key)!.push(row);
+        }
+      }
+
+      for (const [key, exercises] of extraGroups) {
+        const [date, title] = key.split("||");
+        const { data: w } = await supabase
+          .from("workouts")
+          .insert({ calendar_id: calendarId, date, title })
+          .select("id").single();
+
+        if (!w) continue;
+
+        for (let i = 0; i < exercises.length; i++) {
+          const ex = exercises[i];
+          let match = allExercises.find((e) => e.name.toLowerCase() === ex.exerciseName.toLowerCase());
+          if (!match) match = allExercises.find((e) =>
+            e.name.toLowerCase().includes(ex.exerciseName.toLowerCase()) ||
+            ex.exerciseName.toLowerCase().includes(e.name.toLowerCase())
+          );
+          if (!match) {
+            const { data: created } = await supabase
+              .from("exercises")
+              .insert({ name: ex.exerciseName, is_public: false, created_by: user.id })
+              .select("id, name").single();
+            if (created) { match = created; allExercises.push(created); }
+          }
+          if (!match) continue;
+
+          const { data: we } = await supabase
+            .from("workout_exercises")
+            .insert({
+              workout_id: w.id, exercise_id: match.id, sort_order: i,
+              sets: ex.sets, reps: ex.reps, load: ex.load, load_type: ex.loadType,
+              tempo: ex.tempo, rest_seconds: ex.restSeconds, notes: ex.notes,
+              superset_group: ex.supersetGroup,
+            })
+            .select("id").single();
+
+          if (we) weIndex.set(`${date}||${ex.exerciseName.toLowerCase()}`, we.id);
+        }
+      }
+    }
+
+    // Apply athlete overrides for ALL sheets that have an athlete match
+    for (const sheet of program.sheets) {
+      if (!sheet.athleteId) continue;
+      setProgress(`Applying overrides for ${sheet.sheetName}…`);
+
+      for (const row of sheet.rows) {
+        const weId = weIndex.get(`${row.date}||${row.exerciseName.toLowerCase()}`);
+        if (!weId) continue;
+
+        await supabase.from("athlete_exercise_overrides").upsert(
+          {
+            workout_exercise_id: weId,
+            athlete_id: sheet.athleteId,
+            sets: row.sets,
+            reps: row.reps,
+            load: row.load,
+          },
+          { onConflict: "workout_exercise_id,athlete_id" }
+        );
+      }
+    }
+
+    setImporting(false);
+    setDialogOpen(false);
+    setProgram(null);
+    setProgress("");
+    router.refresh();
+  }
+
+  const totalRows = program?.sheets.reduce((n, s) => n + s.rows.length, 0) ?? 0;
+  const unmatchedSheets = program?.sheets.filter((s) => !s.athleteId).map((s) => s.sheetName) ?? [];
+  const uniqueWorkouts = program
+    ? new Set(program.sheets.flatMap((s) => s.rows.map((r) => `${r.date}||${r.workoutTitle}`))).size
+    : 0;
+
+  return (
+    <>
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) parseFile(f); }}
+        onClick={() => inputRef.current?.click()}
+        className={`border-2 border-dashed rounded-lg p-5 text-center cursor-pointer transition-colors ${
+          dragging ? "border-primary bg-primary/5" : "border-muted-foreground/25 hover:border-muted-foreground/50 hover:bg-muted/30"
+        }`}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".xlsx,.xls"
+          className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) parseFile(f); e.target.value = ""; }}
+        />
+        <FileSpreadsheet className={`h-7 w-7 mx-auto mb-2 ${dragging ? "text-primary" : "text-muted-foreground"}`} />
+        <p className="text-sm font-medium">Import program from Excel</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          One sheet per athlete — sheet name must match athlete name
+          <br />
+          Columns: Date · Workout · Superset · Exercise · Sets · Reps · Load · Type · Tempo · Notes
+        </p>
+      </div>
+
+      <Dialog open={dialogOpen} onOpenChange={(o) => !importing && setDialogOpen(o)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Import program</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3 text-sm">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-lg border p-3">
+                <p className="text-2xl font-bold">{program?.sheets.length}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">athletes</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-2xl font-bold">{uniqueWorkouts}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">workouts</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-2xl font-bold">{totalRows}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">exercises</p>
+              </div>
+            </div>
+
+            {unmatchedSheets.length > 0 && (
+              <div className="flex gap-2 rounded-lg bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 p-3 text-xs">
+                <AlertTriangle className="h-4 w-4 text-yellow-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-yellow-800 dark:text-yellow-400">Sheets not matched to athletes (no overrides):</p>
+                  <p className="text-yellow-700 dark:text-yellow-500 mt-0.5">{unmatchedSheets.join(", ")}</p>
+                  <p className="text-yellow-600 dark:text-yellow-600 mt-1">Sheet names must exactly match athlete names in the system.</p>
+                </div>
+              </div>
+            )}
+
+            {program?.warnings.filter((w) => !w.startsWith("Athlete")).map((w, i) => (
+              <div key={i} className="flex gap-2 rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-xs text-destructive">
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />{w}
+              </div>
+            ))}
+
+            <div className="rounded-lg border divide-y max-h-52 overflow-y-auto">
+              {program?.sheets.map((sheet) => (
+                <div key={sheet.sheetName} className="px-3 py-2 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`h-2 w-2 rounded-full ${sheet.athleteId ? "bg-green-500" : "bg-yellow-400"}`} />
+                    <p className="font-medium text-xs">{sheet.sheetName}</p>
+                  </div>
+                  <span className="text-xs text-muted-foreground">{sheet.rows.length} rows</span>
+                </div>
+              ))}
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              The first sheet sets the base prescription. All matched sheets generate per-athlete overrides.
+            </p>
+
+            {importing && progress && (
+              <p className="text-xs text-muted-foreground text-center animate-pulse">{progress}</p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={importing}>Cancel</Button>
+            <Button onClick={handleImport} disabled={importing}>
+              {importing ? "Importing…" : `Import ${uniqueWorkouts} workouts`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

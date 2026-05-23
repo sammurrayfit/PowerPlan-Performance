@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { MonthView } from "@/components/coach/calendar/month-view";
+import { ProgramImport } from "@/components/coach/calendar/program-import";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -44,12 +45,32 @@ export default async function CalendarPage({ params, searchParams }: Props) {
     .lte("date", lastDayStr)
     .order("date");
 
+  // Fetch athletes for program import override matching
+  let athletes: { id: string; full_name: string }[] = [];
+  if (calendar.team_id) {
+    const { data: memberships } = await supabase
+      .from("team_memberships")
+      .select("athlete_id")
+      .eq("team_id", calendar.team_id);
+    const ids = (memberships ?? []).map((m) => m.athlete_id);
+    if (ids.length > 0) {
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", ids);
+      athletes = profiles ?? [];
+    }
+  }
+
   return (
-    <MonthView
-      calendar={calendar}
-      workouts={workouts ?? []}
-      year={year}
-      month={monthIndex}
-    />
+    <div className="space-y-6">
+      <MonthView
+        calendar={calendar}
+        workouts={workouts ?? []}
+        year={year}
+        month={monthIndex}
+      />
+      <ProgramImport calendarId={id} athletes={athletes} />
+    </div>
   );
 }

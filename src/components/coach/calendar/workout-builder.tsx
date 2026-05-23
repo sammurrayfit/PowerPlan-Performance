@@ -47,6 +47,7 @@ interface WorkoutExerciseRow {
   rest_seconds: number | null;
   notes: string | null;
   is_pr_tracking: boolean;
+  superset_group: string | null;
 }
 
 interface AllExercise {
@@ -110,6 +111,10 @@ function ExerciseRow({
     };
   }
 
+  const supersetColor = row.superset_group
+    ? `hsl(${(row.superset_group.toUpperCase().charCodeAt(0) - 65) * 37 + 200}, 70%, 50%)`
+    : undefined;
+
   return (
     <tr ref={setNodeRef} style={style} className="border-b group">
       <td className="w-8 px-2 py-1">
@@ -117,7 +122,25 @@ function ExerciseRow({
           <GripVertical className="h-4 w-4" />
         </button>
       </td>
-      <td className="px-2 py-1 font-medium text-sm min-w-[160px]">{row.exercise_name}</td>
+      <td className="px-1 py-1 w-10">
+        <input
+          type="text"
+          maxLength={2}
+          defaultValue={row.superset_group ?? ""}
+          onBlur={field("superset_group", row.superset_group)}
+          placeholder="—"
+          className="h-7 w-full rounded border border-input bg-background text-center text-xs font-bold uppercase px-1"
+          style={row.superset_group ? { borderColor: supersetColor, color: supersetColor } : undefined}
+        />
+      </td>
+      <td className="px-2 py-1 font-medium text-sm min-w-[160px]">
+        <div className="flex items-center gap-1.5">
+          {row.superset_group && (
+            <div className="w-0.5 h-5 rounded-full shrink-0" style={{ backgroundColor: supersetColor }} />
+          )}
+          {row.exercise_name}
+        </div>
+      </td>
       <td className="px-1 py-1 w-16">
         <Input
           type="number"
@@ -259,6 +282,7 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
           rest_seconds: null,
           notes: null,
           is_pr_tracking: false,
+          superset_group: null,
         },
       ]);
     }
@@ -326,6 +350,7 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
           tempo: row.tempo,
           rest_seconds: row.restSeconds,
           notes: row.notes,
+          superset_group: row.supersetGroup ?? null,
         })
         .select("id")
         .single();
@@ -344,6 +369,7 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
           rest_seconds: row.restSeconds,
           notes: row.notes,
           is_pr_tracking: false,
+          superset_group: row.supersetGroup ?? null,
         });
         nextOrder++;
       }
@@ -457,6 +483,7 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
               <thead className="bg-muted/50 text-xs text-muted-foreground uppercase tracking-wide">
                 <tr>
                   <th className="w-8" />
+                  <th className="px-2 py-2 text-left w-10" title="Superset group">SS</th>
                   <th className="px-2 py-2 text-left">Exercise</th>
                   <th className="px-2 py-2 text-left w-16">Sets</th>
                   <th className="px-2 py-2 text-left w-20">Reps</th>

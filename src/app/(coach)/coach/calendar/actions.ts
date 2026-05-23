@@ -92,6 +92,7 @@ export async function copyWorkout(workoutId: string, targetDates: string[]) {
           rest_seconds: we.rest_seconds,
           notes: we.notes,
           is_pr_tracking: we.is_pr_tracking,
+          superset_group: we.superset_group,
         }))
       );
     }

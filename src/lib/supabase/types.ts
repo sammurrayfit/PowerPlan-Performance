@@ -195,6 +195,7 @@ export type Database = {
           rest_seconds: number | null;
           notes: string | null;
           is_pr_tracking: boolean;
+          superset_group: string | null;
           created_at: string;
         };
         Insert: {
@@ -210,6 +211,7 @@ export type Database = {
           rest_seconds?: number | null;
           notes?: string | null;
           is_pr_tracking?: boolean;
+          superset_group?: string | null;
           created_at?: string;
         };
         Update: {
@@ -225,6 +227,7 @@ export type Database = {
           rest_seconds?: number | null;
           notes?: string | null;
           is_pr_tracking?: boolean;
+          superset_group?: string | null;
           created_at?: string;
         };
       } & NoRelationships;

@@ -20,6 +20,7 @@ export interface ParsedExerciseRow {
   tempo: string | null;
   restSeconds: number | null;
   notes: string | null;
+  supersetGroup: string | null;
 }
 
 interface ExcelImportProps {
@@ -39,6 +40,7 @@ function detectColumns(headers: string[]) {
     tempo: find("tempo"),
     rest: find("rest"),
     notes: find("notes", "note", "comment", "cue", "coaching"),
+    superset: find("superset", "ss", "group"),
   };
 }
 
@@ -65,6 +67,8 @@ function parseRow(row: unknown[], colMap: ColMap): ParsedExerciseRow | null {
     loadType = "bodyweight";
   }
 
+  const supersetRaw = String(get(colMap.superset)).trim().toUpperCase();
+
   return {
     exerciseName,
     sets: setsRaw !== "" ? Number(setsRaw) || null : null,
@@ -74,6 +78,7 @@ function parseRow(row: unknown[], colMap: ColMap): ParsedExerciseRow | null {
     tempo: String(get(colMap.tempo)).trim() || null,
     restSeconds: restRaw !== "" ? Number(restRaw) || null : null,
     notes: String(get(colMap.notes)).trim() || null,
+    supersetGroup: supersetRaw || null,
   };
 }
 
