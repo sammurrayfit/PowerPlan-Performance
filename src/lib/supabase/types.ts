@@ -92,7 +92,7 @@ export type Database = {
           image_url: string | null;
           category_id: string | null;
           muscle_groups: string[];
-          created_by: string;
+          created_by: string | null;
           is_public: boolean;
           created_at: string;
         };
@@ -105,7 +105,7 @@ export type Database = {
           image_url?: string | null;
           category_id?: string | null;
           muscle_groups?: string[];
-          created_by: string;
+          created_by?: string | null;
           is_public?: boolean;
           created_at?: string;
         };
