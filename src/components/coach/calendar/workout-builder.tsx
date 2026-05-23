@@ -27,6 +27,7 @@ import { GripVertical, Plus, Trash2, Lock, Unlock, Star } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { updateWorkout, deleteWorkout } from "@/app/(coach)/coach/calendar/actions";
 import { ExercisePicker } from "./exercise-picker";
+import { ExcelImport, type ParsedExerciseRow } from "./excel-import";
 import type { Database } from "@/lib/supabase/types";
 
 type Workout = Database["public"]["Tables"]["workouts"]["Row"];
@@ -254,6 +255,83 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
     );
   }
 
+  async function handleImportExcel(rows: ParsedExerciseRow[]) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    let nextOrder = exercises.length > 0 ? Math.max(...exercises.map((e) => e.sort_order)) + 1 : 0;
+    const newRows: WorkoutExerciseRow[] = [];
+
+    for (const row of rows) {
+      // Match exercise by name (case-insensitive)
+      let match = allExercises.find(
+        (e) => e.name.toLowerCase() === row.exerciseName.toLowerCase()
+      );
+
+      // Partial match fallback
+      if (!match) {
+        match = allExercises.find(
+          (e) =>
+            e.name.toLowerCase().includes(row.exerciseName.toLowerCase()) ||
+            row.exerciseName.toLowerCase().includes(e.name.toLowerCase())
+        );
+      }
+
+      // Auto-create if still not found
+      if (!match) {
+        const { data: created } = await supabase
+          .from("exercises")
+          .insert({ name: row.exerciseName, is_public: false, created_by: user.id })
+          .select("id, name, muscle_groups")
+          .single();
+        if (created) {
+          match = created;
+          // Add to local allExercises so subsequent rows can match it
+          allExercises.push(created);
+        }
+      }
+
+      if (!match) continue;
+
+      const { data: we } = await supabase
+        .from("workout_exercises")
+        .insert({
+          workout_id: workout.id,
+          exercise_id: match.id,
+          sort_order: nextOrder,
+          sets: row.sets,
+          reps: row.reps,
+          load: row.load,
+          load_type: row.loadType,
+          tempo: row.tempo,
+          rest_seconds: row.restSeconds,
+          notes: row.notes,
+        })
+        .select("id")
+        .single();
+
+      if (we) {
+        newRows.push({
+          id: we.id,
+          exercise_id: match.id,
+          exercise_name: match.name,
+          sort_order: nextOrder,
+          sets: row.sets,
+          reps: row.reps,
+          load: row.load,
+          load_type: row.loadType,
+          tempo: row.tempo,
+          rest_seconds: row.restSeconds,
+          notes: row.notes,
+          is_pr_tracking: false,
+        });
+        nextOrder++;
+      }
+    }
+
+    setExercises((prev) => [...prev, ...newRows]);
+  }
+
   async function toggleLock() {
     const next = !isLocked;
     setIsLocked(next);
@@ -351,10 +429,14 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
         )}
       </div>
 
-      <Button onClick={() => setPickerOpen(true)}>
-        <Plus className="h-4 w-4 mr-2" />
-        Add exercise
-      </Button>
+      <div className="flex items-center gap-3">
+        <Button onClick={() => setPickerOpen(true)}>
+          <Plus className="h-4 w-4 mr-2" />
+          Add exercise
+        </Button>
+      </div>
+
+      <ExcelImport onImport={handleImportExcel} />
 
       {/* Exercise picker sheet */}
       <Sheet open={pickerOpen} onOpenChange={setPickerOpen}>
