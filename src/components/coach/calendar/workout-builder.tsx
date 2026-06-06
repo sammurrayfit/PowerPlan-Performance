@@ -19,6 +19,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -241,17 +242,26 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
   );
 
   const handleUpdate = useCallback(async (id: string, field: string, value: unknown) => {
-    setExercises((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
-    );
+    const prev = exercises.find((r) => r.id === id);
+    setExercises((rows) => rows.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await supabase.from("workout_exercises").update({ [field]: value } as any).eq("id", id);
-  }, [supabase]);
+    const { error } = await supabase.from("workout_exercises").update({ [field]: value } as any).eq("id", id);
+    if (error) {
+      // Roll back optimistic update
+      if (prev) setExercises((rows) => rows.map((r) => (r.id === id ? prev : r)));
+      toast.error("Failed to save — change was not saved");
+    }
+  }, [supabase, exercises]);
 
   const handleDelete = useCallback(async (id: string) => {
-    setExercises((prev) => prev.filter((r) => r.id !== id));
-    await supabase.from("workout_exercises").delete().eq("id", id);
-  }, [supabase]);
+    const prev = exercises.find((r) => r.id === id);
+    setExercises((rows) => rows.filter((r) => r.id !== id));
+    const { error } = await supabase.from("workout_exercises").delete().eq("id", id);
+    if (error) {
+      if (prev) setExercises((rows) => [...rows, prev].sort((a, b) => a.sort_order - b.sort_order));
+      toast.error("Failed to delete exercise");
+    }
+  }, [supabase, exercises]);
 
   async function handleAddExercise(ex: AllExercise) {
     const nextOrder = exercises.length > 0 ? Math.max(...exercises.map((e) => e.sort_order)) + 1 : 0;

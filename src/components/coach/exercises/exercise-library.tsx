@@ -22,7 +22,7 @@ interface ExerciseLibraryProps {
 const MUSCLE_GROUP_SECTIONS = [
   { label: "Chest & Shoulders", muscles: ["Chest", "Anterior Deltoid", "Middle Deltoid", "Posterior Deltoid"] },
   { label: "Arms & Back", muscles: ["Triceps", "Biceps", "Forearms", "Back", "Latissimus Dorsi", "Trapezius", "Neck"] },
-  { label: "Lower Body", muscles: ["Quads", "Hamstrings", "Glutes", "Adductors", "Abductors", "Calves", "Anterior Tibialis"] },
+  { label: "Lower Body", muscles: ["Quads", "Hamstrings", "Glutes", "Groin", "Hip Flexors", "Calves", "Anterior Tibialis", "Ankles"] },
   { label: "Core", muscles: ["Rectus Abdominis", "Lower Core", "Obliques", "Lower Back"] },
 ];
 

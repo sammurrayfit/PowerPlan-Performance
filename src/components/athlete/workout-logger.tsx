@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, Circle } from "lucide-react";
+import { CheckCircle2, Circle, ChevronDown, ChevronUp, Play, Flag } from "lucide-react";
+import { RPE_LABELS, RPE_OPTIONS } from "@/lib/rpe";
 
 interface Override {
   sets?: number | null;
@@ -28,6 +30,8 @@ interface Exercise {
   id: string;
   exercise_id: string;
   exercise_name: string;
+  video_url: string | null;
+  image_url: string | null;
   sort_order: number;
   sets: number | null;
   reps: string | null;
@@ -115,17 +119,18 @@ function ExerciseCard({
     const rpeNum = row.rpe !== "" ? parseInt(row.rpe, 10) : null;
 
     if (row.logId) {
-      await supabase
+      const { error } = await supabase
         .from("exercise_logs")
         .update({ reps_completed: repsNum, load_completed: loadNum, rpe: rpeNum })
         .eq("id", row.logId);
+      if (error) { toast.error("Failed to save set"); return; }
       setRows((prev) => {
         const next = [...prev];
         next[index] = { ...next[index], saved: true };
         return next;
       });
     } else {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("exercise_logs")
         .insert({
           workout_exercise_id: exercise.id,
@@ -138,6 +143,7 @@ function ExerciseCard({
         })
         .select("id")
         .single();
+      if (error) { toast.error("Failed to save set"); return; }
       setRows((prev) => {
         const next = [...prev];
         next[index] = { ...next[index], saved: true, logId: data?.id ?? null };
@@ -155,6 +161,8 @@ function ExerciseCard({
     : "";
 
   const completedCount = rows.filter((r) => r.saved).length;
+  const [demoOpen, setDemoOpen] = useState(false);
+  const hasDemo = !!(exercise.video_url || exercise.image_url);
 
   return (
     <Card className="overflow-hidden">
@@ -192,7 +200,38 @@ function ExerciseCard({
         {!exercise.override?.notes && exercise.notes && (
           <p className="text-xs text-muted-foreground mt-1">{exercise.notes}</p>
         )}
+
+        {hasDemo && (
+          <button
+            onClick={() => setDemoOpen((o) => !o)}
+            className="flex items-center gap-1 text-xs text-primary mt-2"
+          >
+            <Play className="w-3 h-3" />
+            Demo
+            {demoOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
+        )}
       </CardHeader>
+
+      {demoOpen && hasDemo && (
+        <div className="px-4 pb-3">
+          {exercise.video_url ? (
+            <video
+              src={exercise.video_url}
+              controls
+              className="w-full rounded-md max-h-64 object-contain bg-black"
+              playsInline
+            />
+          ) : exercise.image_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={exercise.image_url}
+              alt={`${exercise.exercise_name} demo`}
+              className="w-full rounded-md max-h-64 object-contain"
+            />
+          ) : null}
+        </div>
+      )}
 
       <CardContent className="px-4 pb-4">
         <div className="space-y-2">
@@ -255,16 +294,99 @@ function ExerciseCard({
   );
 }
 
+function RPEPrompt({
+  workoutId,
+  athleteId,
+  onDone,
+}: {
+  workoutId: string;
+  athleteId: string;
+  onDone: () => void;
+}) {
+  const supabase = createClient();
+  const [selected, setSelected] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  async function submit() {
+    if (selected == null) return;
+    setSaving(true);
+    await supabase
+      .from("attendance")
+      .upsert(
+        { workout_id: workoutId, athlete_id: athleteId, rpe_post: selected },
+        { onConflict: "workout_id,athlete_id" }
+      );
+    setSaving(false);
+    setSaved(true);
+    setTimeout(onDone, 1200);
+  }
+
+  if (saved) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-8">
+        <CheckCircle2 className="w-12 h-12 text-green-500" />
+        <p className="text-lg font-semibold">Great work today!</p>
+        <p className="text-sm text-muted-foreground">Post-workout RPE saved.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-lg font-bold">How hard was that?</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Rate the overall difficulty of your workout (0 = no exertion, 10 = maximum effort).
+        </p>
+      </div>
+
+      <div className="grid grid-cols-6 gap-2">
+        {RPE_OPTIONS.map((n) => (
+          <button
+            key={n}
+            onClick={() => setSelected(n)}
+            className={`rounded-lg border-2 py-3 text-center transition-all ${
+              selected === n
+                ? "border-primary bg-primary text-primary-foreground font-bold"
+                : "border-input hover:border-primary/50"
+            }`}
+          >
+            <div className="text-xl font-bold">{n}</div>
+          </button>
+        ))}
+      </div>
+
+      {selected != null && (
+        <p className="text-sm text-center text-muted-foreground">
+          RPE {selected} — {RPE_LABELS[selected]}
+        </p>
+      )}
+
+      <Button
+        className="w-full"
+        disabled={selected == null || saving}
+        onClick={submit}
+      >
+        {saving ? "Saving…" : "Save & Finish"}
+      </Button>
+    </div>
+  );
+}
+
 export function WorkoutLogger({
   workout,
   exercises,
   athleteId,
+  attendanceId,
 }: {
   workout: Workout;
   exercises: Exercise[];
   athleteId: string;
+  attendanceId?: string | null;
 }) {
   const totalSets = exercises.reduce((sum, e) => sum + (e.override?.sets ?? e.sets ?? 1), 0);
+  const [showRPEPrompt, setShowRPEPrompt] = useState(false);
 
   return (
     <div className="space-y-4">
@@ -283,23 +405,46 @@ export function WorkoutLogger({
         </p>
       </div>
 
-      {exercises.length === 0 ? (
+      {showRPEPrompt ? (
         <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">
-            No exercises in this workout.
+          <CardContent className="pt-6">
+            <RPEPrompt
+              workoutId={workout.id}
+              athleteId={athleteId}
+              onDone={() => setShowRPEPrompt(false)}
+            />
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-3">
-          {exercises.map((ex) => (
-            <ExerciseCard
-              key={ex.id}
-              exercise={ex}
-              athleteId={athleteId}
-              workoutId={workout.id}
-            />
-          ))}
-        </div>
+        <>
+          {exercises.length === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground">
+                No exercises in this workout.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {exercises.map((ex) => (
+                <ExerciseCard
+                  key={ex.id}
+                  exercise={ex}
+                  athleteId={athleteId}
+                  workoutId={workout.id}
+                />
+              ))}
+            </div>
+          )}
+
+          <Button
+            variant="outline"
+            className="w-full gap-2"
+            onClick={() => setShowRPEPrompt(true)}
+          >
+            <Flag className="w-4 h-4" />
+            Finish Workout
+          </Button>
+        </>
       )}
 
       <div className="pb-8" />

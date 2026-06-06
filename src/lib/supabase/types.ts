@@ -369,6 +369,7 @@ export type Database = {
           athlete_id: string;
           status: "present" | "absent" | "late";
           rpe_pre: number | null;
+          rpe_post: number | null;
           notes: string | null;
           created_at: string;
         };
@@ -378,6 +379,7 @@ export type Database = {
           athlete_id: string;
           status?: "present" | "absent" | "late";
           rpe_pre?: number | null;
+          rpe_post?: number | null;
           notes?: string | null;
           created_at?: string;
         };
@@ -387,6 +389,7 @@ export type Database = {
           athlete_id?: string;
           status?: "present" | "absent" | "late";
           rpe_pre?: number | null;
+          rpe_post?: number | null;
           notes?: string | null;
           created_at?: string;
         };

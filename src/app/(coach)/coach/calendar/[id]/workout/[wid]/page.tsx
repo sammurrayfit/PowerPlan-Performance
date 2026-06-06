@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { WorkoutBuilder } from "@/components/coach/calendar/workout-builder";
+import { AttendancePanel } from "@/components/coach/calendar/attendance-panel";
 
 interface Props {
   params: Promise<{ id: string; wid: string }>;
@@ -24,10 +25,12 @@ export default async function WorkoutPage({ params }: Props) {
   if (!workout || workout.calendar_id !== id) notFound();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const exercises = (rawExercises ?? []) as any[];
+  const exercises = (rawExercises ?? []).map((e: any) => ({
+    ...e,
+    exercise_name: (e.exercises as { name: string } | null)?.name ?? "",
+  }));
   const exerciseIds = exercises.map((e) => e.id);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const baseExerciseIds: string[] = exercises.map((e: any) => e.exercise_id).filter(Boolean);
+  const baseExerciseIds: string[] = exercises.map((e) => e.exercise_id).filter(Boolean);
 
   let athletes: { id: string; full_name: string }[] = [];
   let initialOverrides: object[] = [];
@@ -77,16 +80,45 @@ export default async function WorkoutPage({ params }: Props) {
     }
   }
 
+  // Fetch existing attendance records for this workout
+  const athleteIds = athletes.map((a) => a.id);
+  const { data: attendanceRaw } = athleteIds.length > 0
+    ? await supabase
+        .from("attendance")
+        .select("athlete_id, status, rpe_pre, rpe_post")
+        .eq("workout_id", wid)
+        .in("athlete_id", athleteIds)
+    : { data: [] };
+
+  const attendanceByAthlete = Object.fromEntries(
+    (attendanceRaw ?? []).map((a) => [a.athlete_id, a])
+  );
+
+  const initialAttendance = athletes.map((a) => ({
+    athleteId: a.id,
+    athleteName: a.full_name,
+    status: (attendanceByAthlete[a.id]?.status ?? null) as "present" | "late" | "absent" | null,
+    rpe_pre: attendanceByAthlete[a.id]?.rpe_pre ?? null,
+    rpe_post: attendanceByAthlete[a.id]?.rpe_post ?? null,
+  }));
+
   return (
-    <WorkoutBuilder
-      workout={workout}
-      initialExercises={exercises}
-      allExercises={allExercises ?? []}
-      calendarId={id}
-      athletes={athletes}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      initialOverrides={initialOverrides as any[]}
-      maxesMap={maxesMap}
-    />
+    <div className="space-y-8">
+      <WorkoutBuilder
+        workout={workout}
+        initialExercises={exercises}
+        allExercises={allExercises ?? []}
+        calendarId={id}
+        athletes={athletes}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        initialOverrides={initialOverrides as any[]}
+        maxesMap={maxesMap}
+      />
+      {athletes.length > 0 && (
+        <div className="border-t pt-6">
+          <AttendancePanel workoutId={wid} initialAttendance={initialAttendance} />
+        </div>
+      )}
+    </div>
   );
 }

@@ -21,7 +21,7 @@ const MUSCLE_GROUPS = [
   "Anterior Deltoid", "Middle Deltoid", "Posterior Deltoid",
   "Triceps", "Biceps", "Forearms",
   "Back", "Latissimus Dorsi", "Trapezius", "Neck",
-  "Quads", "Hamstrings", "Glutes", "Adductors", "Abductors", "Calves", "Anterior Tibialis",
+  "Quads", "Hamstrings", "Glutes", "Groin", "Hip Flexors", "Calves", "Anterior Tibialis", "Ankles",
   "Rectus Abdominis", "Lower Core", "Obliques", "Lower Back",
   "Full Body",
 ];

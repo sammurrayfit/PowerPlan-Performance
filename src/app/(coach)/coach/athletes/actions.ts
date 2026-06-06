@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { autoRecordPR } from "@/lib/pr";
 
 function adminClient() {
   return createAdminClient(
@@ -11,6 +12,36 @@ function adminClient() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
+}
+
+export async function createAthleteDirectly(formData: FormData) {
+  const email = formData.get("email") as string;
+  const teamId = formData.get("team_id") as string;
+  const fullName = formData.get("full_name") as string;
+  const password = formData.get("password") as string;
+
+  const admin = adminClient();
+
+  const { data: created, error } = await admin.auth.admin.createUser({
+    email,
+    password,
+    user_metadata: { role: "athlete", full_name: fullName },
+    email_confirm: true,
+  });
+
+  if (error || !created.user) throw new Error(error?.message ?? "Failed to create account");
+
+  await admin.from("profiles").upsert(
+    { id: created.user.id, full_name: fullName, role: "athlete" },
+    { onConflict: "id" }
+  );
+
+  await admin.from("team_memberships").upsert(
+    { team_id: teamId, athlete_id: created.user.id },
+    { onConflict: "team_id,athlete_id", ignoreDuplicates: true }
+  );
+
+  revalidatePath("/coach/athletes");
 }
 
 export async function inviteAthlete(formData: FormData) {
@@ -44,6 +75,16 @@ export async function inviteAthlete(formData: FormData) {
 
 export async function removeAthleteFromTeam(athleteId: string, teamId: string) {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: team } = await supabase
+    .from("teams")
+    .select("coach_id")
+    .eq("id", teamId)
+    .single();
+  if (!team || team.coach_id !== user.id) throw new Error("Not authorized");
+
   await supabase
     .from("team_memberships")
     .delete()
@@ -61,25 +102,7 @@ export async function addMax(athleteId: string, exerciseId: string, value: numbe
     date_recorded: dateRecorded,
   });
 
-  // Auto-record as PR if it's the best ever
-  const { data: existingPr } = await supabase
-    .from("personal_records")
-    .select("value")
-    .eq("athlete_id", athleteId)
-    .eq("exercise_id", exerciseId)
-    .order("value", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (!existingPr || value > existingPr.value) {
-    await supabase.from("personal_records").insert({
-      athlete_id: athleteId,
-      exercise_id: exerciseId,
-      value,
-      unit: "lbs",
-      date_achieved: dateRecorded,
-    });
-  }
+  await autoRecordPR(supabase, athleteId, exerciseId, value, "lbs", dateRecorded);
 
   revalidatePath(`/coach/athletes/${athleteId}`);
 }
@@ -124,4 +147,93 @@ export async function assignCalendarToAthlete(calendarId: string, athleteId: str
 
 export async function goToAthleteProfile(athleteId: string) {
   redirect(`/coach/athletes/${athleteId}`);
+}
+
+// ── Bulk max import ───────────────────────────────────────────────────────────
+
+export interface BulkMaxRow {
+  athleteName: string;
+  exerciseName: string;
+  value: number;       // already converted to estimated 1RM if reps > 1
+  reps: number;
+  date: string;
+}
+
+export interface BulkImportResult {
+  inserted: number;
+  skipped: { row: BulkMaxRow; reason: string }[];
+}
+
+export async function bulkImportMaxes(rows: BulkMaxRow[]): Promise<BulkImportResult> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  // Load all athletes under this coach
+  const { data: teams } = await supabase
+    .from("teams")
+    .select("id")
+    .eq("coach_id", user.id);
+  const teamIds = (teams ?? []).map((t) => t.id);
+
+  const { data: memberships } = teamIds.length > 0
+    ? await supabase.from("team_memberships").select("athlete_id").in("team_id", teamIds)
+    : { data: [] };
+  const athleteIds = [...new Set((memberships ?? []).map((m) => m.athlete_id))];
+
+  const { data: profiles } = athleteIds.length > 0
+    ? await supabase.from("profiles").select("id, full_name").in("id", athleteIds)
+    : { data: [] };
+
+  // Case-insensitive athlete name → id
+  const athleteMap: Record<string, string> = {};
+  for (const p of profiles ?? []) {
+    athleteMap[p.full_name.toLowerCase().trim()] = p.id;
+  }
+
+  // Load all exercises
+  const { data: exercises } = await supabase.from("exercises").select("id, name");
+  const exerciseMap: Record<string, string> = {};
+  for (const e of exercises ?? []) {
+    exerciseMap[e.name.toLowerCase().trim()] = e.id;
+  }
+
+  const skipped: BulkImportResult["skipped"] = [];
+  let inserted = 0;
+
+  for (const row of rows) {
+    const athleteId = athleteMap[row.athleteName.toLowerCase().trim()];
+    if (!athleteId) {
+      skipped.push({ row, reason: `Athlete "${row.athleteName}" not found` });
+      continue;
+    }
+
+    // Fuzzy exercise match: exact first, then startsWith, then includes
+    const key = row.exerciseName.toLowerCase().trim();
+    let exerciseId = exerciseMap[key];
+    if (!exerciseId) {
+      const match = Object.entries(exerciseMap).find(
+        ([n]) => n.startsWith(key) || key.startsWith(n)
+      );
+      if (match) exerciseId = match[1];
+    }
+    if (!exerciseId) {
+      skipped.push({ row, reason: `Exercise "${row.exerciseName}" not found` });
+      continue;
+    }
+
+    await supabase.from("maxes").insert({
+      athlete_id: athleteId,
+      exercise_id: exerciseId,
+      value: row.value,
+      date_recorded: row.date,
+    });
+
+    await autoRecordPR(supabase, athleteId, exerciseId, row.value, "lbs", row.date);
+
+    inserted++;
+  }
+
+  revalidatePath("/coach/athletes");
+  return { inserted, skipped };
 }

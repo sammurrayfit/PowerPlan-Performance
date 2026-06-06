@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { CoachSidebar } from "@/components/coach/coach-sidebar";
@@ -18,9 +19,12 @@ export default async function CoachLayout({ children }: { children: React.ReactN
 
   if (!profile || profile.role !== "coach") redirect("/athlete/dashboard");
 
+  // Read sidebar cookie server-side to avoid hydration mismatch
+  const cookieStore = await cookies();
+  const sidebarOpen = cookieStore.get("sidebar_state")?.value !== "false";
 
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={sidebarOpen}>
       <CoachSidebar profile={profile} />
       <SidebarInset>
         <main className="flex-1 p-6">{children}</main>

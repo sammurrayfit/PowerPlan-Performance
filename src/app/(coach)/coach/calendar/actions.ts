@@ -61,7 +61,7 @@ export async function deleteWorkout(id: string, calendarId: string) {
   redirect(`/coach/calendar/${calendarId}`);
 }
 
-export async function copyWorkout(workoutId: string, targetDates: string[]) {
+export async function copyWorkout(workoutId: string, targetDates: string[], replace = false) {
   const supabase = await createClient();
 
   const [{ data: workout }, { data: workoutExercises }] = await Promise.all([
@@ -72,14 +72,28 @@ export async function copyWorkout(workoutId: string, targetDates: string[]) {
   if (!workout) return;
 
   for (const date of targetDates) {
-    const { data: newWorkout } = await supabase
+    if (replace) {
+      // Delete any existing workouts on the same calendar+date (cascades to exercises via FK)
+      const { data: existing } = await supabase
+        .from("workouts")
+        .select("id")
+        .eq("calendar_id", workout.calendar_id)
+        .eq("date", date);
+      if (existing?.length) {
+        await supabase.from("workouts").delete().in("id", existing.map((w) => w.id));
+      }
+    }
+
+    const { data: newWorkout, error: workoutErr } = await supabase
       .from("workouts")
       .insert({ calendar_id: workout.calendar_id, date, title: workout.title, notes: workout.notes })
       .select("id")
       .single();
 
-    if (newWorkout && workoutExercises?.length) {
-      await supabase.from("workout_exercises").insert(
+    if (workoutErr || !newWorkout) throw new Error(workoutErr?.message ?? "Failed to copy workout");
+
+    if (workoutExercises?.length) {
+      const { error: exErr } = await supabase.from("workout_exercises").insert(
         workoutExercises.map((we) => ({
           workout_id: newWorkout.id,
           exercise_id: we.exercise_id,
@@ -95,10 +109,22 @@ export async function copyWorkout(workoutId: string, targetDates: string[]) {
           superset_group: we.superset_group,
         }))
       );
+      if (exErr) throw new Error(exErr.message);
     }
   }
 
   revalidatePath(`/coach/calendar/${workout.calendar_id}`);
+}
+
+async function assertCoachOwnsWorkoutExercise(supabase: Awaited<ReturnType<typeof createClient>>, workoutExerciseId: string, coachId: string) {
+  const { data } = await supabase
+    .from("workout_exercises")
+    .select("workouts(calendars(coach_id))")
+    .eq("id", workoutExerciseId)
+    .single();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const owner = (data as any)?.workouts?.calendars?.coach_id;
+  if (owner !== coachId) throw new Error("Not authorized");
 }
 
 export async function upsertOverride(
@@ -113,6 +139,9 @@ export async function upsertOverride(
   }
 ) {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  await assertCoachOwnsWorkoutExercise(supabase, workoutExerciseId, user.id);
   await supabase.from("athlete_exercise_overrides").upsert(
     { workout_exercise_id: workoutExerciseId, athlete_id: athleteId, ...data },
     { onConflict: "workout_exercise_id,athlete_id" }
@@ -121,9 +150,31 @@ export async function upsertOverride(
 
 export async function deleteOverride(workoutExerciseId: string, athleteId: string) {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  await assertCoachOwnsWorkoutExercise(supabase, workoutExerciseId, user.id);
   await supabase
     .from("athlete_exercise_overrides")
     .delete()
     .eq("workout_exercise_id", workoutExerciseId)
     .eq("athlete_id", athleteId);
+}
+
+export async function upsertAttendance(
+  workoutId: string,
+  athleteId: string,
+  data: {
+    status?: "present" | "absent" | "late";
+    rpe_pre?: number | null;
+    rpe_post?: number | null;
+    notes?: string | null;
+  }
+) {
+  const supabase = await createClient();
+  await supabase
+    .from("attendance")
+    .upsert(
+      { workout_id: workoutId, athlete_id: athleteId, ...data },
+      { onConflict: "workout_id,athlete_id" }
+    );
 }

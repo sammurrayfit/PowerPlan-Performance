@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AthleteRoster } from "@/components/coach/athletes/athlete-roster";
 import { Leaderboard } from "@/components/coach/athletes/leaderboard";
 import { AthletesPageTabs } from "@/components/coach/athletes/athletes-page-tabs";
+import { MaxesImport, MaxesImportHint } from "@/components/coach/athletes/maxes-import";
 
 export default async function AthletesPage() {
   const supabase = await createClient();
@@ -85,10 +86,14 @@ export default async function AthletesPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Athletes</h1>
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-bold">Athletes</h1>
+        <MaxesImport />
+      </div>
       <AthletesPageTabs
         roster={<AthleteRoster teams={teamsWithAthletes} />}
         leaderboard={<Leaderboard allMaxes={allMaxes} />}
+        importHint={<MaxesImportHint />}
       />
     </div>
   );

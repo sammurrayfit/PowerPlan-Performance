@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Copy } from "lucide-react";
 import { copyWorkout } from "@/app/(coach)/coach/calendar/actions";
+import { toast } from "sonner";
 
 type Mode = "single" | "multi" | "weekly";
 
@@ -91,6 +92,7 @@ export function CopyWorkoutModal({ workoutId, workoutTitle }: CopyWorkoutModalPr
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("single");
   const [loading, setLoading] = useState(false);
+  const [replace, setReplace] = useState(false);
 
   // Single
   const [singleDate, setSingleDate] = useState("");
@@ -121,14 +123,20 @@ export function CopyWorkoutModal({ workoutId, workoutTitle }: CopyWorkoutModalPr
   async function handleCopy() {
     if (targetDates.length === 0) return;
     setLoading(true);
-    await copyWorkout(workoutId, targetDates);
-    setLoading(false);
-    setOpen(false);
-    setSingleDate("");
-    setMultiDates([]);
-    setWeeklyStart("");
-    setWeeklyEnd("");
-    setWeeklyDays([]);
+    try {
+      await copyWorkout(workoutId, targetDates, replace);
+      setOpen(false);
+      setSingleDate("");
+      setMultiDates([]);
+      setWeeklyStart("");
+      setWeeklyEnd("");
+      setWeeklyDays([]);
+      setReplace(false);
+    } catch {
+      toast.error("Failed to copy workout");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -226,6 +234,23 @@ export function CopyWorkoutModal({ workoutId, workoutTitle }: CopyWorkoutModalPr
               )}
             </div>
           )}
+
+          {/* Replace toggle */}
+          <button
+            type="button"
+            onClick={() => setReplace((r) => !r)}
+            className="flex items-center gap-3 w-full rounded-lg border px-3 py-2.5 text-sm text-left hover:bg-muted/50 transition-colors"
+          >
+            <div className={`relative h-5 w-9 rounded-full transition-colors shrink-0 ${replace ? "bg-primary" : "bg-input"}`}>
+              <div className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${replace ? "translate-x-4" : "translate-x-0.5"}`} />
+            </div>
+            <div>
+              <p className="font-medium leading-none">Replace existing workouts</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Delete any existing workout on the target date before copying
+              </p>
+            </div>
+          </button>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>

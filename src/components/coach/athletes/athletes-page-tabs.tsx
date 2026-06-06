@@ -5,9 +5,10 @@ import { useState, type ReactNode } from "react";
 interface AthletesPageTabsProps {
   roster: ReactNode;
   leaderboard: ReactNode;
+  importHint?: ReactNode;
 }
 
-export function AthletesPageTabs({ roster, leaderboard }: AthletesPageTabsProps) {
+export function AthletesPageTabs({ roster, leaderboard, importHint }: AthletesPageTabsProps) {
   const [tab, setTab] = useState<"roster" | "leaderboard">("roster");
 
   return (
@@ -27,7 +28,14 @@ export function AthletesPageTabs({ roster, leaderboard }: AthletesPageTabsProps)
           </button>
         ))}
       </div>
-      <div>{tab === "roster" ? roster : leaderboard}</div>
+      <div>
+        {tab === "roster" ? roster : (
+          <div className="space-y-4">
+            {importHint}
+            {leaderboard}
+          </div>
+        )}
+      </div>
     </>
   );
 }

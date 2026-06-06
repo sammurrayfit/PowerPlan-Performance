@@ -28,19 +28,21 @@ import {
   CalendarDays,
   Dumbbell,
   Users,
-  BarChart3,
+  Wrench,
   ChevronUp,
   LogOut,
+  Warehouse,
 } from "lucide-react";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 
 const navItems = [
-  { href: "/coach/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/coach/calendar",  label: "Calendars",  icon: CalendarDays },
-  { href: "/coach/exercises", label: "Exercises",  icon: Dumbbell },
-  { href: "/coach/athletes",  label: "Athletes",   icon: Users },
-  { href: "/coach/reports",   label: "Reports",    icon: BarChart3 },
+  { href: "/coach/dashboard",        label: "Dashboard",       icon: LayoutDashboard },
+  { href: "/coach/calendar",         label: "Calendars",       icon: CalendarDays },
+  { href: "/coach/exercises",        label: "Exercises",       icon: Dumbbell },
+  { href: "/coach/athletes",         label: "Athletes",        icon: Users },
+  { href: "/coach/weightroom",       label: "Weightroom",      icon: Warehouse },
+  { href: "/coach/coaching-tools",   label: "Coaching Tools",  icon: Wrench },
 ];
 
 export function CoachSidebar({ profile }: { profile: Profile }) {

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { UserPlus, UserMinus, ChevronRight, Plus } from "lucide-react";
-import { inviteAthlete, removeAthleteFromTeam, createTeam } from "@/app/(coach)/coach/athletes/actions";
+import { inviteAthlete, createAthleteDirectly, removeAthleteFromTeam, createTeam } from "@/app/(coach)/coach/athletes/actions";
 
 interface Athlete {
   id: string;
@@ -32,6 +32,7 @@ function AddAthleteDialog({ teams }: { teams: Team[] }) {
   const [loading, setLoading] = useState(false);
   const [selectedTeamId, setSelectedTeamId] = useState<string>(teams[0]?.id ?? "__new__");
   const [newTeamName, setNewTeamName] = useState("");
+  const [method, setMethod] = useState<"invite" | "direct">("direct");
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -48,13 +49,17 @@ function AddAthleteDialog({ teams }: { teams: Team[] }) {
       }
 
       fd.set("team_id", teamId);
-      await inviteAthlete(fd);
+      if (method === "direct") {
+        await createAthleteDirectly(fd);
+      } else {
+        await inviteAthlete(fd);
+      }
       setOpen(false);
       setNewTeamName("");
       setSelectedTeamId(teams[0]?.id ?? "__new__");
       router.refresh();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to send invite");
+      alert(err instanceof Error ? err.message : "Failed to add athlete");
     } finally {
       setLoading(false);
     }
@@ -74,6 +79,24 @@ function AddAthleteDialog({ teams }: { teams: Team[] }) {
           </DialogHeader>
           <form onSubmit={handleSubmit}>
             <div className="space-y-3 mt-2">
+              {/* Method toggle */}
+              <div className="flex rounded-lg border overflow-hidden text-sm">
+                <button
+                  type="button"
+                  onClick={() => setMethod("direct")}
+                  className={`flex-1 py-1.5 transition-colors ${method === "direct" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                >
+                  Set password
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMethod("invite")}
+                  className={`flex-1 py-1.5 transition-colors ${method === "invite" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                >
+                  Email invite
+                </button>
+              </div>
+
               <div className="space-y-1.5">
                 <Label>Name</Label>
                 <Input name="full_name" placeholder="Jane Smith" required />
@@ -82,6 +105,15 @@ function AddAthleteDialog({ teams }: { teams: Team[] }) {
                 <Label>Email</Label>
                 <Input name="email" type="email" placeholder="jane@example.com" required />
               </div>
+
+              {method === "direct" && (
+                <div className="space-y-1.5">
+                  <Label>Temporary password</Label>
+                  <Input name="password" type="password" placeholder="8+ characters" minLength={8} required />
+                  <p className="text-xs text-muted-foreground">Share this with the athlete — they can change it after logging in.</p>
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <Label>Team</Label>
                 <select
@@ -102,7 +134,6 @@ function AddAthleteDialog({ teams }: { teams: Team[] }) {
                     placeholder="e.g. Varsity, Group A"
                     value={newTeamName}
                     onChange={(e) => setNewTeamName(e.target.value)}
-                    autoFocus
                   />
                 </div>
               )}
@@ -112,7 +143,7 @@ function AddAthleteDialog({ teams }: { teams: Team[] }) {
                 Cancel
               </Button>
               <Button type="submit" disabled={loading}>
-                {loading ? "Sending…" : "Send invite"}
+                {loading ? "Adding…" : method === "direct" ? "Create account" : "Send invite"}
               </Button>
             </DialogFooter>
           </form>

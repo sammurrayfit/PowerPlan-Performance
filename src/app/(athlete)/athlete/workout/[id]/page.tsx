@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { WorkoutLogger } from "@/components/athlete/workout-logger";
+import { RPEGate } from "@/components/athlete/rpe-gate";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -16,12 +17,43 @@ export default async function AthleteWorkoutPage({ params }: Props) {
     supabase.from("workouts").select("id, title, date, notes, is_locked, calendar_id").eq("id", id).single(),
     supabase
       .from("workout_exercises")
-      .select("*, exercises(id, name)")
+      .select("*, exercises(id, name, video_url, image_url)")
       .eq("workout_id", id)
       .order("sort_order"),
   ]);
 
   if (!workout) notFound();
+
+  // Check attendance (for RPE gate + post-RPE)
+  const { data: attendance, error: attendanceError } = await supabase
+    .from("attendance")
+    .select("id, rpe_pre, rpe_post")
+    .eq("workout_id", id)
+    .eq("athlete_id", user.id)
+    .maybeSingle();
+
+  // On DB error, fail safe: block access rather than silently bypassing the gate
+  if (attendanceError) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-2 text-center">
+        <p className="font-medium">Unable to load workout</p>
+        <p className="text-sm text-muted-foreground">Please refresh the page and try again.</p>
+      </div>
+    );
+  }
+
+  const needsRPEGate = workout.is_locked && (attendance == null || attendance.rpe_pre == null);
+
+  if (needsRPEGate) {
+    return (
+      <RPEGate
+        workoutId={id}
+        workoutTitle={workout.title}
+        workoutDate={workout.date}
+        athleteId={user.id}
+      />
+    );
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const exercises = (rawExercises ?? []) as any[];
@@ -45,18 +77,15 @@ export default async function AthleteWorkoutPage({ params }: Props) {
       : Promise.resolve({ data: [] }),
   ]);
 
-  // Latest max per exercise
   const maxesMap: Record<string, number> = {};
   for (const m of maxesRaw ?? []) {
     if (!maxesMap[m.exercise_id]) maxesMap[m.exercise_id] = Number(m.value);
   }
 
-  // Overrides by workout_exercise_id
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const overridesMap: Record<string, any> = {};
   for (const o of overridesRaw ?? []) overridesMap[o.workout_exercise_id] = o;
 
-  // Logs grouped by workout_exercise_id
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const logsMap: Record<string, any[]> = {};
   for (const l of logsRaw ?? []) {
@@ -68,7 +97,9 @@ export default async function AthleteWorkoutPage({ params }: Props) {
   const exerciseList = exercises.map((e: any) => ({
     id: e.id,
     exercise_id: e.exercise_id,
-    exercise_name: (e.exercises as { name: string })?.name ?? "Unknown",
+    exercise_name: (e.exercises as { name: string } | null)?.name ?? "Unknown",
+    video_url: (e.exercises as { video_url: string | null } | null)?.video_url ?? null,
+    image_url: (e.exercises as { image_url: string | null } | null)?.image_url ?? null,
     sort_order: e.sort_order,
     sets: e.sets,
     reps: e.reps,
@@ -88,6 +119,7 @@ export default async function AthleteWorkoutPage({ params }: Props) {
       workout={workout}
       exercises={exerciseList}
       athleteId={user.id}
+      attendanceId={attendance?.id ?? null}
     />
   );
 }
