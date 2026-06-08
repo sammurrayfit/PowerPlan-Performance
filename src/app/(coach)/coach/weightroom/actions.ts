@@ -1,6 +1,83 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
+
+function adminClient() {
+  return createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
+}
+
+// ── Save a set log on behalf of an athlete (coach-authenticated, bypasses RLS) ─
+export async function saveKioskSet(params: {
+  workoutExerciseId: string;
+  athleteId: string;
+  workoutId: string;
+  setNumber: number;
+  repsCompleted: number | null;
+  loadCompleted: number | null;
+  rpe: number | null;
+  existingLogId?: string | null;
+}): Promise<{ id: string } | null> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  // Verify this coach owns the workout
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: wo } = await supabase
+    .from("workouts")
+    .select("calendars(coach_id)")
+    .eq("id", params.workoutId)
+    .single();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if ((wo as any)?.calendars?.coach_id !== user.id) throw new Error("Not authorized");
+
+  const admin = adminClient();
+  if (params.existingLogId) {
+    const { error } = await admin
+      .from("exercise_logs")
+      .update({
+        reps_completed: params.repsCompleted,
+        load_completed: params.loadCompleted,
+        rpe: params.rpe,
+      })
+      .eq("id", params.existingLogId);
+    if (error) throw new Error(error.message);
+    return { id: params.existingLogId };
+  } else {
+    const { data, error } = await admin
+      .from("exercise_logs")
+      .insert({
+        workout_exercise_id: params.workoutExerciseId,
+        athlete_id: params.athleteId,
+        workout_id: params.workoutId,
+        set_number: params.setNumber,
+        reps_completed: params.repsCompleted,
+        load_completed: params.loadCompleted,
+        rpe: params.rpe,
+      })
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  }
+}
+
+export type PreviousSet = {
+  set_number: number;
+  reps: number | null;
+  load: number | null;
+  rpe: number | null;
+};
+
+export type PreviousSession = {
+  date: string;
+  sets: PreviousSet[];
+};
 
 // ── Single-athlete (used by athlete self-log) ─────────────────────────────────
 export async function fetchAthleteWorkoutData(workoutId: string, athleteId: string) {
@@ -23,7 +100,7 @@ export async function fetchAthleteWorkoutData(workoutId: string, athleteId: stri
   const weIds = exercises.map((e) => e.id);
   const baseExerciseIds: string[] = exercises.map((e) => e.exercise_id).filter(Boolean);
 
-  const [{ data: overridesRaw }, { data: maxesRaw }] = await Promise.all([
+  const [{ data: overridesRaw }, { data: maxesRaw }, { data: prevWEs }] = await Promise.all([
     weIds.length > 0
       ? supabase
           .from("athlete_exercise_overrides")
@@ -39,7 +116,58 @@ export async function fetchAthleteWorkoutData(workoutId: string, athleteId: stri
           .in("exercise_id", baseExerciseIds)
           .order("date_recorded", { ascending: false })
       : Promise.resolve({ data: [] }),
+    // Previous workout_exercises for the same exercises (different workout)
+    baseExerciseIds.length > 0
+      ? supabase
+          .from("workout_exercises")
+          .select("id, exercise_id, workout_id, workouts(date)")
+          .in("exercise_id", baseExerciseIds)
+          .neq("workout_id", workoutId)
+      : Promise.resolve({ data: [] }),
   ]);
+
+  // For each exercise_id, find the most recent previous workout_exercise
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const latestWeByExId: Record<string, { weId: string; date: string }> = {};
+  for (const we of prevWEs ?? [] as any[]) {
+    const exId = we.exercise_id as string;
+    const date = (we.workouts as { date: string } | null)?.date ?? "";
+    if (!date) continue;
+    if (!latestWeByExId[exId] || date > latestWeByExId[exId].date) {
+      latestWeByExId[exId] = { weId: we.id, date };
+    }
+  }
+
+  const prevWeIds = Object.values(latestWeByExId).map((v) => v.weId);
+  const { data: prevLogsRaw } = prevWeIds.length > 0
+    ? await supabase
+        .from("exercise_logs")
+        .select("workout_exercise_id, set_number, reps_completed, load_completed, rpe")
+        .eq("athlete_id", athleteId)
+        .in("workout_exercise_id", prevWeIds)
+        .order("set_number")
+    : { data: [] };
+
+  // Build previousSession map keyed by workout_exercise_id → exercise_id → session
+  const prevWeIdToExId: Record<string, string> = {};
+  for (const [exId, { weId }] of Object.entries(latestWeByExId)) {
+    prevWeIdToExId[weId] = exId;
+  }
+
+  const prevSessionByExId: Record<string, PreviousSession> = {};
+  for (const l of prevLogsRaw ?? [] as any[]) {
+    const exId = prevWeIdToExId[l.workout_exercise_id];
+    if (!exId) continue;
+    if (!prevSessionByExId[exId]) {
+      prevSessionByExId[exId] = { date: latestWeByExId[exId].date, sets: [] };
+    }
+    prevSessionByExId[exId].sets.push({
+      set_number: l.set_number,
+      reps: l.reps_completed ?? null,
+      load: l.load_completed ?? null,
+      rpe: l.rpe ?? null,
+    });
+  }
 
   const maxesMap: Record<string, number> = {};
   for (const m of maxesRaw ?? []) {
@@ -75,6 +203,7 @@ export async function fetchAthleteWorkoutData(workoutId: string, athleteId: stri
     override: overridesMap[e.id] ?? null,
     max: e.exercise_id ? (maxesMap[e.exercise_id] ?? null) : null,
     logs: logsMap[e.id] ?? [],
+    previousSession: e.exercise_id ? (prevSessionByExId[e.exercise_id] ?? null) : null,
   }));
 }
 

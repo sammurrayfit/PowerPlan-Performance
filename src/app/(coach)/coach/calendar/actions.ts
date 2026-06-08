@@ -15,7 +15,7 @@ export async function createCalendar(formData: FormData) {
 
   await supabase.from("calendars").insert({
     name,
-    color: color || "#6366f1",
+    color: color || "#32127A",
     coach_id: user.id,
     team_id: teamId || null,
   });

@@ -91,7 +91,7 @@ export default async function AthleteProfilePage({ params, searchParams }: Props
     scheduleWorkouts = (wkts ?? []).map((w) => ({
       ...w,
       calendarName:  calMap[w.calendar_id]?.name  ?? "",
-      calendarColor: calMap[w.calendar_id]?.color ?? "#6366f1",
+      calendarColor: calMap[w.calendar_id]?.color ?? "#32127A",
     }));
   }
 

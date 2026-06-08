@@ -26,6 +26,13 @@ interface ExerciseLog {
   rpe: number | null;
 }
 
+interface PreviousSet {
+  set_number: number;
+  reps: number | null;
+  load: number | null;
+  rpe: number | null;
+}
+
 interface Exercise {
   id: string;
   exercise_id: string;
@@ -44,6 +51,7 @@ interface Exercise {
   override: Override | null;
   max: number | null;
   logs: ExerciseLog[];
+  previousSession: { date: string; sets: PreviousSet[] } | null;
 }
 
 interface Workout {
@@ -76,10 +84,12 @@ function ExerciseCard({
   exercise,
   athleteId,
   workoutId,
+  onSaveSet,
 }: {
   exercise: Exercise;
   athleteId: string;
   workoutId: string;
+  onSaveSet?: SaveSetFn;
 }) {
   const supabase = createClient();
 
@@ -118,37 +128,59 @@ function ExerciseCard({
     const loadNum = row.load !== "" ? parseFloat(row.load) : null;
     const rpeNum = row.rpe !== "" ? parseInt(row.rpe, 10) : null;
 
-    if (row.logId) {
-      const { error } = await supabase
-        .from("exercise_logs")
-        .update({ reps_completed: repsNum, load_completed: loadNum, rpe: rpeNum })
-        .eq("id", row.logId);
-      if (error) { toast.error("Failed to save set"); return; }
-      setRows((prev) => {
-        const next = [...prev];
-        next[index] = { ...next[index], saved: true };
-        return next;
-      });
-    } else {
-      const { data, error } = await supabase
-        .from("exercise_logs")
-        .insert({
-          workout_exercise_id: exercise.id,
-          athlete_id: athleteId,
-          workout_id: workoutId,
-          set_number: index + 1,
-          reps_completed: repsNum,
-          load_completed: loadNum,
+    try {
+      if (onSaveSet) {
+        // Coach-authenticated path (weightroom kiosk) — uses server action to bypass RLS
+        const result = await onSaveSet({
+          workoutExerciseId: exercise.id,
+          athleteId,
+          workoutId,
+          setNumber: index + 1,
+          repsCompleted: repsNum,
+          loadCompleted: loadNum,
           rpe: rpeNum,
-        })
-        .select("id")
-        .single();
-      if (error) { toast.error("Failed to save set"); return; }
-      setRows((prev) => {
-        const next = [...prev];
-        next[index] = { ...next[index], saved: true, logId: data?.id ?? null };
-        return next;
-      });
+          existingLogId: row.logId,
+        });
+        setRows((prev) => {
+          const next = [...prev];
+          next[index] = { ...next[index], saved: true, logId: result?.id ?? row.logId };
+          return next;
+        });
+      } else if (row.logId) {
+        // Athlete-authenticated path — direct Supabase (RLS allows own logs)
+        const { error } = await supabase
+          .from("exercise_logs")
+          .update({ reps_completed: repsNum, load_completed: loadNum, rpe: rpeNum })
+          .eq("id", row.logId);
+        if (error) throw error;
+        setRows((prev) => {
+          const next = [...prev];
+          next[index] = { ...next[index], saved: true };
+          return next;
+        });
+      } else {
+        const { data, error } = await supabase
+          .from("exercise_logs")
+          .insert({
+            workout_exercise_id: exercise.id,
+            athlete_id: athleteId,
+            workout_id: workoutId,
+            set_number: index + 1,
+            reps_completed: repsNum,
+            load_completed: loadNum,
+            rpe: rpeNum,
+          })
+          .select("id")
+          .single();
+        if (error) throw error;
+        setRows((prev) => {
+          const next = [...prev];
+          next[index] = { ...next[index], saved: true, logId: data?.id ?? null };
+          return next;
+        });
+      }
+    } catch {
+      toast.error("Failed to save set");
     }
   }
 
@@ -235,59 +267,80 @@ function ExerciseCard({
 
       <CardContent className="px-4 pb-4">
         <div className="space-y-2">
-          <div className="grid grid-cols-[2rem_1fr_1fr_1fr_2rem] gap-1 text-xs text-muted-foreground px-1">
+          {/* Column headers */}
+          <div className={`grid gap-1 text-xs text-muted-foreground px-1 ${exercise.previousSession ? "grid-cols-[2rem_1fr_1fr_1fr_auto_2rem]" : "grid-cols-[2rem_1fr_1fr_1fr_2rem]"}`}>
             <span>Set</span>
             <span>Reps</span>
             <span>Load (lbs)</span>
             <span>RPE</span>
+            {exercise.previousSession && <span className="text-primary font-medium">Last</span>}
             <span />
           </div>
 
-          {rows.map((row, i) => (
-            <div key={i} className="grid grid-cols-[2rem_1fr_1fr_1fr_2rem] gap-1 items-center">
-              <span className="text-sm text-muted-foreground text-center">{i + 1}</span>
-              <Input
-                className="h-8 text-sm"
-                type="number"
-                min={0}
-                placeholder={effectiveReps || "—"}
-                value={row.reps}
-                onChange={(e) => updateRow(i, "reps", e.target.value)}
-                onBlur={() => { if (row.reps || row.load) saveSet(i); }}
-              />
-              <Input
-                className="h-8 text-sm"
-                type="number"
-                min={0}
-                step={0.5}
-                placeholder={calcLbs != null ? String(calcLbs) : "—"}
-                value={row.load}
-                onChange={(e) => updateRow(i, "load", e.target.value)}
-                onBlur={() => { if (row.reps || row.load) saveSet(i); }}
-              />
-              <Input
-                className="h-8 text-sm"
-                type="number"
-                min={1}
-                max={10}
-                placeholder="—"
-                value={row.rpe}
-                onChange={(e) => updateRow(i, "rpe", e.target.value)}
-                onBlur={() => { if (row.reps || row.load) saveSet(i); }}
-              />
-              <button
-                onClick={() => saveSet(i)}
-                className="flex items-center justify-center text-muted-foreground hover:text-green-500 transition-colors"
-                title="Mark saved"
-              >
-                {row.saved ? (
-                  <CheckCircle2 className="w-4 h-4 text-green-500" />
-                ) : (
-                  <Circle className="w-4 h-4" />
+          {rows.map((row, i) => {
+            const prev = exercise.previousSession?.sets.find((s) => s.set_number === i + 1);
+            const prevLabel = prev
+              ? [prev.load != null ? `${prev.load}lb` : null, prev.reps != null ? `×${prev.reps}` : null]
+                  .filter(Boolean).join(" ") || "—"
+              : null;
+
+            return (
+              <div key={i} className={`grid gap-1 items-center ${exercise.previousSession ? "grid-cols-[2rem_1fr_1fr_1fr_auto_2rem]" : "grid-cols-[2rem_1fr_1fr_1fr_2rem]"}`}>
+                <span className="text-sm text-muted-foreground text-center">{i + 1}</span>
+                <Input
+                  className="h-8 text-sm"
+                  type="number"
+                  min={0}
+                  placeholder={effectiveReps || "—"}
+                  value={row.reps}
+                  onChange={(e) => updateRow(i, "reps", e.target.value)}
+                  onBlur={() => { if (row.reps || row.load) saveSet(i); }}
+                />
+                <Input
+                  className="h-8 text-sm"
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  placeholder={calcLbs != null ? String(calcLbs) : "—"}
+                  value={row.load}
+                  onChange={(e) => updateRow(i, "load", e.target.value)}
+                  onBlur={() => { if (row.reps || row.load) saveSet(i); }}
+                />
+                <Input
+                  className="h-8 text-sm"
+                  type="number"
+                  min={1}
+                  max={10}
+                  placeholder="—"
+                  value={row.rpe}
+                  onChange={(e) => updateRow(i, "rpe", e.target.value)}
+                  onBlur={() => { if (row.reps || row.load) saveSet(i); }}
+                />
+                {exercise.previousSession && (
+                  <span className="text-xs text-primary font-medium whitespace-nowrap px-1">
+                    {prevLabel ?? "—"}
+                  </span>
                 )}
-              </button>
-            </div>
-          ))}
+                <button
+                  onClick={() => saveSet(i)}
+                  className="flex items-center justify-center text-muted-foreground hover:text-green-500 transition-colors"
+                  title="Mark saved"
+                >
+                  {row.saved ? (
+                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                  ) : (
+                    <Circle className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+            );
+          })}
+
+          {exercise.previousSession && (
+            <p className="text-[10px] text-muted-foreground pt-1">
+              Last session: {new Date(exercise.previousSession.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -374,16 +427,29 @@ function RPEPrompt({
   );
 }
 
+type SaveSetFn = (params: {
+  workoutExerciseId: string;
+  athleteId: string;
+  workoutId: string;
+  setNumber: number;
+  repsCompleted: number | null;
+  loadCompleted: number | null;
+  rpe: number | null;
+  existingLogId?: string | null;
+}) => Promise<{ id: string } | null>;
+
 export function WorkoutLogger({
   workout,
   exercises,
   athleteId,
   attendanceId,
+  onSaveSet,
 }: {
   workout: Workout;
   exercises: Exercise[];
   athleteId: string;
   attendanceId?: string | null;
+  onSaveSet?: SaveSetFn;
 }) {
   const totalSets = exercises.reduce((sum, e) => sum + (e.override?.sets ?? e.sets ?? 1), 0);
   const [showRPEPrompt, setShowRPEPrompt] = useState(false);
@@ -405,7 +471,38 @@ export function WorkoutLogger({
         </p>
       </div>
 
-      {showRPEPrompt ? (
+      {/* Always keep ExerciseCards mounted to preserve set state */}
+      <div className={showRPEPrompt ? "hidden" : ""}>
+        {exercises.length === 0 ? (
+          <Card>
+            <CardContent className="py-8 text-center text-muted-foreground">
+              No exercises in this workout.
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {exercises.map((ex) => (
+              <ExerciseCard
+                key={ex.id}
+                exercise={ex}
+                athleteId={athleteId}
+                workoutId={workout.id}
+                onSaveSet={onSaveSet}
+              />
+            ))}
+          </div>
+        )}
+        <Button
+          variant="outline"
+          className="w-full gap-2"
+          onClick={() => setShowRPEPrompt(true)}
+        >
+          <Flag className="w-4 h-4" />
+          Finish Workout
+        </Button>
+      </div>
+
+      {showRPEPrompt && (
         <Card>
           <CardContent className="pt-6">
             <RPEPrompt
@@ -415,36 +512,6 @@ export function WorkoutLogger({
             />
           </CardContent>
         </Card>
-      ) : (
-        <>
-          {exercises.length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">
-                No exercises in this workout.
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {exercises.map((ex) => (
-                <ExerciseCard
-                  key={ex.id}
-                  exercise={ex}
-                  athleteId={athleteId}
-                  workoutId={workout.id}
-                />
-              ))}
-            </div>
-          )}
-
-          <Button
-            variant="outline"
-            className="w-full gap-2"
-            onClick={() => setShowRPEPrompt(true)}
-          >
-            <Flag className="w-4 h-4" />
-            Finish Workout
-          </Button>
-        </>
       )}
 
       <div className="pb-8" />

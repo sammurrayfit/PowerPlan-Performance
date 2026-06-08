@@ -83,7 +83,7 @@ export default async function WeightroomPage({ searchParams }: Props) {
   return (
     <div className="space-y-5">
       <DateNav date={date} today={today} />
-      <AthleteKiosk workouts={workoutsWithAthletes} profiles={profiles} date={date} />
+      <AthleteKiosk key={date} workouts={workoutsWithAthletes} profiles={profiles} date={date} />
     </div>
   );
 }

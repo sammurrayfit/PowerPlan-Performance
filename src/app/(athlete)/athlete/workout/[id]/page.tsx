@@ -94,6 +94,45 @@ export default async function AthleteWorkoutPage({ params }: Props) {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // Fetch previous session data for each exercise
+  const { data: prevWEs } = exerciseBaseIds.length > 0
+    ? await supabase
+        .from("workout_exercises")
+        .select("id, exercise_id, workout_id, workouts(date)")
+        .in("exercise_id", exerciseBaseIds)
+        .neq("workout_id", id)
+    : { data: [] };
+
+  const latestWeByExId: Record<string, { weId: string; date: string }> = {};
+  for (const we of prevWEs ?? [] as any[]) {
+    const exId = we.exercise_id as string;
+    const date = (we.workouts as { date: string } | null)?.date ?? "";
+    if (!date) continue;
+    if (!latestWeByExId[exId] || date > latestWeByExId[exId].date) {
+      latestWeByExId[exId] = { weId: we.id, date };
+    }
+  }
+  const prevWeIds = Object.values(latestWeByExId).map((v) => v.weId);
+  const prevWeIdToExId: Record<string, string> = {};
+  for (const [exId, { weId }] of Object.entries(latestWeByExId)) prevWeIdToExId[weId] = exId;
+
+  const { data: prevLogsRaw } = prevWeIds.length > 0
+    ? await supabase
+        .from("exercise_logs")
+        .select("workout_exercise_id, set_number, reps_completed, load_completed, rpe")
+        .eq("athlete_id", user.id)
+        .in("workout_exercise_id", prevWeIds)
+        .order("set_number")
+    : { data: [] };
+
+  const prevSessionByExId: Record<string, { date: string; sets: { set_number: number; reps: number | null; load: number | null; rpe: number | null }[] }> = {};
+  for (const l of prevLogsRaw ?? [] as any[]) {
+    const exId = prevWeIdToExId[l.workout_exercise_id];
+    if (!exId) continue;
+    if (!prevSessionByExId[exId]) prevSessionByExId[exId] = { date: latestWeByExId[exId].date, sets: [] };
+    prevSessionByExId[exId].sets.push({ set_number: l.set_number, reps: l.reps_completed ?? null, load: l.load_completed ?? null, rpe: l.rpe ?? null });
+  }
+
   const exerciseList = exercises.map((e: any) => ({
     id: e.id,
     exercise_id: e.exercise_id,
@@ -112,6 +151,7 @@ export default async function AthleteWorkoutPage({ params }: Props) {
     override: overridesMap[e.id] ?? null,
     max: e.exercise_id ? (maxesMap[e.exercise_id] ?? null) : null,
     logs: logsMap[e.id] ?? [],
+    previousSession: e.exercise_id ? (prevSessionByExId[e.exercise_id] ?? null) : null,
   }));
 
   return (

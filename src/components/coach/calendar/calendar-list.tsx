@@ -15,8 +15,18 @@ type Team = { id: string; name: string };
 type Athlete = { id: string; full_name: string };
 
 const COLORS = [
-  "#6366f1", "#3b82f6", "#22c55e", "#f97316",
-  "#ef4444", "#a855f7", "#ec4899", "#14b8a6",
+  // Reds & Pinks
+  "#ef4444", "#dc2626", "#ec4899", "#db2777",
+  // Oranges & Yellows
+  "#f97316", "#ea580c", "#eab308", "#ca8a04",
+  // Greens
+  "#4ade80", "#16a34a", "#84cc16", "#166534",
+  // Blues & Cyans
+  "#3b82f6", "#2563eb", "#0ea5e9", "#0284c7",
+  // Purples & Indigos
+  "#8b5cf6", "#7c3aed", "#6366f1", "#32127A",
+  // Teals & Neutrals
+  "#14b8a6", "#0d9488", "#64748b", "#1e293b",
 ];
 
 interface CalendarListProps {
@@ -26,28 +36,27 @@ interface CalendarListProps {
   athletesByTeam: Record<string, Athlete[]>;
 }
 
-function AssignTeamDialog({
+function EditCalendarDialog({
   calendar,
   teams,
   onSaved,
 }: {
   calendar: Calendar;
   teams: Team[];
-  onSaved: (calendarId: string, teamId: string | null) => void;
+  onSaved: (calendarId: string, updates: { team_id?: string | null; color?: string }) => void;
 }) {
   const supabase = createClient();
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState(calendar.team_id ?? "");
+  const [selectedTeam, setSelectedTeam] = useState(calendar.team_id ?? "");
+  const [selectedColor, setSelectedColor] = useState(calendar.color);
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
     setSaving(true);
-    const { error } = await supabase
-      .from("calendars")
-      .update({ team_id: selected || null })
-      .eq("id", calendar.id);
+    const updates = { team_id: selectedTeam || null, color: selectedColor };
+    const { error } = await supabase.from("calendars").update(updates).eq("id", calendar.id);
     if (error) { alert(error.message); setSaving(false); return; }
-    onSaved(calendar.id, selected || null);
+    onSaved(calendar.id, updates);
     setOpen(false);
     setSaving(false);
   }
@@ -57,30 +66,49 @@ function AssignTeamDialog({
       <button
         onClick={(e) => { e.stopPropagation(); setOpen(true); }}
         className="opacity-0 group-hover:opacity-100 p-1.5 rounded hover:bg-muted transition-all"
-        title="Assign team"
+        title="Edit calendar"
       >
         <Settings2 className="h-4 w-4 text-muted-foreground" />
       </button>
       <Dialog open={open} onOpenChange={(o) => !saving && setOpen(o)}>
         <DialogContent className="sm:max-w-sm" onClick={(e) => e.stopPropagation()}>
           <DialogHeader>
-            <DialogTitle>Assign team — {calendar.name}</DialogTitle>
+            <DialogTitle>Edit — {calendar.name}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-1.5 mt-2">
-            <Label>Team</Label>
-            <select
-              className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-              value={selected}
-              onChange={(e) => setSelected(e.target.value)}
-            >
-              <option value="">No team (general calendar)</option>
-              {teams.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-            <p className="text-xs text-muted-foreground pt-1">
-              Athletes in the selected team will see this calendar's workouts.
-            </p>
+          <div className="space-y-4 mt-2">
+            <div className="space-y-1.5">
+              <Label>Color</Label>
+              <div className="flex gap-2 flex-wrap">
+                {COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setSelectedColor(c)}
+                    className="h-8 w-8 rounded-full border-2 transition-all"
+                    style={{
+                      backgroundColor: c,
+                      borderColor: selectedColor === c ? "white" : "transparent",
+                      outline: selectedColor === c ? `2px solid ${c}` : "none",
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+            {teams.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Team</Label>
+                <select
+                  className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                  value={selectedTeam}
+                  onChange={(e) => setSelectedTeam(e.target.value)}
+                >
+                  <option value="">No team (general calendar)</option>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           <DialogFooter className="mt-4">
             <Button variant="outline" onClick={() => setOpen(false)} disabled={saving}>Cancel</Button>
@@ -215,9 +243,9 @@ export function CalendarList({ calendars: initialCalendars, teams, coachId, athl
     setDeleting(null);
   }
 
-  function handleTeamAssigned(calendarId: string, newTeamId: string | null) {
+  function handleCalendarUpdated(calendarId: string, updates: { team_id?: string | null; color?: string }) {
     setCalendarList((prev) =>
-      prev.map((c) => c.id === calendarId ? { ...c, team_id: newTeamId } : c)
+      prev.map((c) => c.id === calendarId ? { ...c, ...updates } : c)
     );
   }
 
@@ -339,13 +367,11 @@ export function CalendarList({ calendars: initialCalendars, teams, coachId, athl
                   )}
                 </p>
               </div>
-              {teams.length > 0 && (
-                <AssignTeamDialog
-                  calendar={cal}
-                  teams={teams}
-                  onSaved={handleTeamAssigned}
-                />
-              )}
+              <EditCalendarDialog
+                calendar={cal}
+                teams={teams}
+                onSaved={handleCalendarUpdated}
+              />
               <button
                 onClick={(e) => handleDelete(e, cal.id)}
                 disabled={deleting === cal.id}

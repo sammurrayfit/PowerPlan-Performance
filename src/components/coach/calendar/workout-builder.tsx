@@ -488,25 +488,25 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
       {activeTab === "prescription" && (
         <>
           {/* Exercise table */}
-          <div className="rounded-lg border overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-xs text-muted-foreground uppercase tracking-wide">
-                <tr>
-                  <th className="w-8" />
-                  <th className="px-2 py-2 text-left w-10" title="Superset group">SS</th>
-                  <th className="px-2 py-2 text-left">Exercise</th>
-                  <th className="px-2 py-2 text-left w-16">Sets</th>
-                  <th className="px-2 py-2 text-left w-20">Reps</th>
-                  <th className="px-2 py-2 text-left w-20">Load</th>
-                  <th className="px-2 py-2 text-left w-20">Type</th>
-                  <th className="px-2 py-2 text-left w-20">Tempo</th>
-                  <th className="px-2 py-2 text-left w-16">Rest</th>
-                  <th className="px-2 py-2 text-left">Notes</th>
-                  <th className="px-2 py-2 w-10" title="PR Tracking">PR</th>
-                  <th className="w-10" />
-                </tr>
-              </thead>
-              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <div className="rounded-lg border overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-xs text-muted-foreground uppercase tracking-wide">
+                  <tr>
+                    <th className="w-8" />
+                    <th className="px-2 py-2 text-left w-10" title="Superset group">SS</th>
+                    <th className="px-2 py-2 text-left">Exercise</th>
+                    <th className="px-2 py-2 text-left w-16">Sets</th>
+                    <th className="px-2 py-2 text-left w-20">Reps</th>
+                    <th className="px-2 py-2 text-left w-20">Load</th>
+                    <th className="px-2 py-2 text-left w-20">Type</th>
+                    <th className="px-2 py-2 text-left w-20">Tempo</th>
+                    <th className="px-2 py-2 text-left w-16">Rest</th>
+                    <th className="px-2 py-2 text-left">Notes</th>
+                    <th className="px-2 py-2 w-10" title="PR Tracking">PR</th>
+                    <th className="w-10" />
+                  </tr>
+                </thead>
                 <SortableContext items={exercises.map((e) => e.id)} strategy={verticalListSortingStrategy}>
                   <tbody>
                     {exercises.map((row) => (
@@ -519,15 +519,15 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
                     ))}
                   </tbody>
                 </SortableContext>
-              </DndContext>
-            </table>
+              </table>
 
-            {exercises.length === 0 && (
-              <div className="text-center py-12 text-muted-foreground text-sm">
-                No exercises yet — add one below.
-              </div>
-            )}
-          </div>
+              {exercises.length === 0 && (
+                <div className="text-center py-12 text-muted-foreground text-sm">
+                  No exercises yet — add one below.
+                </div>
+              )}
+            </div>
+          </DndContext>
 
           <div className="flex items-center gap-3">
             <Button onClick={() => setPickerOpen(true)}>

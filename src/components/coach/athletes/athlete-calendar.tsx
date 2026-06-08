@@ -163,7 +163,7 @@ function MonthView({ athleteId, workouts, view, focusDate }: AthleteCalendarProp
                   <>
                     <span
                       className="text-xs font-medium inline-flex h-6 w-6 items-center justify-center rounded-full"
-                      style={isToday ? { backgroundColor: "#6366f1", color: "white" } : undefined}
+                      style={isToday ? { backgroundColor: "#7c3aed", color: "#ffffff" } : undefined}
                     >
                       {day}
                     </span>
@@ -241,7 +241,7 @@ function WeekView({ athleteId, workouts, view, focusDate }: AthleteCalendarProps
                 <p className="text-xs text-muted-foreground">{DAY_HEADERS[day.getDay()]}</p>
                 <span
                   className="text-sm font-semibold inline-flex h-7 w-7 items-center justify-center rounded-full mx-auto mt-0.5"
-                  style={isToday ? { backgroundColor: "#6366f1", color: "white" } : undefined}
+                  style={isToday ? { backgroundColor: "#7c3aed", color: "#ffffff" } : undefined}
                 >
                   {day.getDate()}
                 </span>
