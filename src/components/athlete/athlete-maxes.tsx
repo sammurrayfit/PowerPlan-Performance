@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { TrendingUp, Trash2, ChevronDown, ChevronRight, Check } from "lucide-react";
 import { addAthleteMax, deleteAthleteMax } from "@/app/(athlete)/athlete/prs/actions";
+import { UNITS, type Unit } from "@/lib/pr";
 
 interface Exercise {
   id: string;
@@ -31,6 +32,7 @@ export function AthleteMaxes({ currentMaxes, maxHistory, exercises }: Props) {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Exercise | null>(null);
   const [weight, setWeight] = useState("");
+  const [unit, setUnit] = useState<Unit>("lbs");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const weightRef = useRef<HTMLInputElement>(null);
@@ -59,7 +61,7 @@ export function AthleteMaxes({ currentMaxes, maxHistory, exercises }: Props) {
   async function handleSave() {
     if (!selected || !weight) return;
     setSaving(true);
-    await addAthleteMax(selected.id, Number(weight), new Date().toISOString().split("T")[0]);
+    await addAthleteMax(selected.id, Number(weight), new Date().toISOString().split("T")[0], unit);
     setSaving(false);
     setSaved(true);
     setTimeout(reset, 1000);
@@ -130,15 +132,25 @@ export function AthleteMaxes({ currentMaxes, maxHistory, exercises }: Props) {
           <Input
             ref={weightRef}
             type="number"
-            min="1"
+            min="0"
             step="0.5"
-            placeholder="lbs"
+            placeholder="value"
             value={weight}
             onChange={(e) => { setWeight(e.target.value); setSaved(false); }}
             onKeyDown={(e) => { if (e.key === "Enter") handleSave(); }}
             className="h-9 text-sm w-20"
             disabled={!selected}
           />
+
+          {/* Unit selector */}
+          <select
+            value={unit}
+            onChange={(e) => setUnit(e.target.value as Unit)}
+            className="h-9 rounded-lg border border-input bg-background px-2 text-sm"
+            disabled={!selected}
+          >
+            {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
 
           {/* Save button */}
           <Button

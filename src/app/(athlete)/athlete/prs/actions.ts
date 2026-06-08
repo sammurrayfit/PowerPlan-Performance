@@ -2,9 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { autoRecordPR } from "@/lib/pr";
+import { autoRecordPR, type Unit } from "@/lib/pr";
 
-export async function addAthleteMax(exerciseId: string, value: number, dateRecorded: string) {
+export async function addAthleteMax(exerciseId: string, value: number, dateRecorded: string, unit: Unit = "lbs") {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
@@ -13,11 +13,12 @@ export async function addAthleteMax(exerciseId: string, value: number, dateRecor
     athlete_id: user.id,
     exercise_id: exerciseId,
     value,
+    unit,
     date_recorded: dateRecorded,
   });
   if (maxError) throw new Error(maxError.message);
 
-  await autoRecordPR(supabase, user.id, exerciseId, value, "lbs", dateRecorded);
+  await autoRecordPR(supabase, user.id, exerciseId, value, unit, dateRecorded);
 
   revalidatePath("/athlete/prs");
 }

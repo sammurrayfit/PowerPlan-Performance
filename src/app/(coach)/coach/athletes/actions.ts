@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
-import { autoRecordPR } from "@/lib/pr";
+import { autoRecordPR, type Unit } from "@/lib/pr";
 
 function adminClient() {
   return createAdminClient(
@@ -93,16 +93,17 @@ export async function removeAthleteFromTeam(athleteId: string, teamId: string) {
   revalidatePath("/coach/athletes");
 }
 
-export async function addMax(athleteId: string, exerciseId: string, value: number, dateRecorded: string) {
+export async function addMax(athleteId: string, exerciseId: string, value: number, dateRecorded: string, unit: Unit = "lbs") {
   const supabase = await createClient();
   await supabase.from("maxes").insert({
     athlete_id: athleteId,
     exercise_id: exerciseId,
     value,
+    unit,
     date_recorded: dateRecorded,
   });
 
-  await autoRecordPR(supabase, athleteId, exerciseId, value, "lbs", dateRecorded);
+  await autoRecordPR(supabase, athleteId, exerciseId, value, unit, dateRecorded);
 
   revalidatePath(`/coach/athletes/${athleteId}`);
 }

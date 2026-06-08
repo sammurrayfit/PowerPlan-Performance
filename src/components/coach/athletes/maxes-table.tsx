@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import { addMax, deleteMax } from "@/app/(coach)/coach/athletes/actions";
+import { UNITS, type Unit } from "@/lib/pr";
 
 interface Exercise {
   id: string;
@@ -42,6 +43,7 @@ function AddMaxDialog({
   const [search, setSearch] = useState("");
   const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
   const [value, setValue] = useState("");
+  const [unit, setUnit] = useState<Unit>("lbs");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
 
   const filtered = exercises
@@ -52,7 +54,7 @@ function AddMaxDialog({
     e.preventDefault();
     if (!selectedExercise || !value) return;
     setLoading(true);
-    await addMax(athleteId, selectedExercise.id, Number(value), date);
+    await addMax(athleteId, selectedExercise.id, Number(value), date, unit);
     onClose();
   }
 
@@ -97,12 +99,12 @@ function AddMaxDialog({
             </div>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label>Max (lbs)</Label>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="space-y-1.5 col-span-1">
+            <Label>Value</Label>
             <Input
               type="number"
-              min="1"
+              min="0"
               step="0.5"
               value={value}
               onChange={(e) => setValue(e.target.value)}
@@ -110,7 +112,17 @@ function AddMaxDialog({
               required
             />
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 col-span-1">
+            <Label>Unit</Label>
+            <select
+              value={unit}
+              onChange={(e) => setUnit(e.target.value as Unit)}
+              className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
+            >
+              {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5 col-span-1">
             <Label>Date</Label>
             <Input
               type="date"

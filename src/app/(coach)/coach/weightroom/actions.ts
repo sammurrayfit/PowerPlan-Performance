@@ -79,6 +79,36 @@ export type PreviousSession = {
   sets: PreviousSet[];
 };
 
+// ── Save post-workout RPE attendance on behalf of an athlete ──────────────────
+export async function saveKioskAttendance(params: {
+  workoutId: string;
+  athleteId: string;
+  rpePost: number;
+}): Promise<void> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  // Verify coach owns the workout
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: wo } = await supabase
+    .from("workouts")
+    .select("calendars(coach_id)")
+    .eq("id", params.workoutId)
+    .single();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if ((wo as any)?.calendars?.coach_id !== user.id) throw new Error("Not authorized");
+
+  const admin = adminClient();
+  const { error } = await admin
+    .from("attendance")
+    .upsert(
+      { workout_id: params.workoutId, athlete_id: params.athleteId, rpe_post: params.rpePost },
+      { onConflict: "workout_id,athlete_id" }
+    );
+  if (error) throw new Error(error.message);
+}
+
 // ── Single-athlete (used by athlete self-log) ─────────────────────────────────
 export async function fetchAthleteWorkoutData(workoutId: string, athleteId: string) {
   const supabase = await createClient();

@@ -32,6 +32,7 @@ export default async function AthleteLayout({ children }: { children: React.Reac
           { href: "/athlete/calendar", label: "Calendar" },
           { href: "/athlete/history", label: "History" },
           { href: "/athlete/prs", label: "PRs" },
+          { href: "/athlete/wellness", label: "Wellness" },
         ].map(({ href, label }) => (
           <Link
             key={href}

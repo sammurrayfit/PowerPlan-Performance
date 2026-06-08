@@ -4,12 +4,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * If `value` is a new all-time best for athlete+exercise, insert a PR record.
  * Must be called server-side with a Supabase client that has the right auth context.
  */
+export const UNITS = ["lbs", "kg", "seconds", "meters"] as const;
+export type Unit = typeof UNITS[number];
+
 export async function autoRecordPR(
   supabase: SupabaseClient,
   athleteId: string,
   exerciseId: string,
   value: number,
-  unit: string,
+  unit: Unit,
   dateAchieved: string
 ) {
   const { data: existing } = await supabase

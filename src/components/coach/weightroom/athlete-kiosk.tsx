@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { fetchAthleteWorkoutData, saveKioskSet } from "@/app/(coach)/coach/weightroom/actions";
+import { fetchAthleteWorkoutData, saveKioskSet, saveKioskAttendance } from "@/app/(coach)/coach/weightroom/actions";
 import { WorkoutLogger } from "@/components/athlete/workout-logger";
 import { Maximize2, Minimize2, ArrowLeft, CheckCircle2, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -124,6 +124,7 @@ function AthletePanel({
           exercises={session.exerciseData}
           athleteId={session.athlete.id}
           onSaveSet={saveKioskSet}
+          onSaveAttendance={saveKioskAttendance}
         />
       </div>
     </div>

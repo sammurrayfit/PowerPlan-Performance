@@ -351,10 +351,12 @@ function RPEPrompt({
   workoutId,
   athleteId,
   onDone,
+  onSaveAttendance,
 }: {
   workoutId: string;
   athleteId: string;
   onDone: () => void;
+  onSaveAttendance?: (params: { workoutId: string; athleteId: string; rpePost: number }) => Promise<void>;
 }) {
   const supabase = createClient();
   const [selected, setSelected] = useState<number | null>(null);
@@ -364,13 +366,20 @@ function RPEPrompt({
   async function submit() {
     if (selected == null) return;
     setSaving(true);
-    await supabase
-      .from("attendance")
-      .upsert(
-        { workout_id: workoutId, athlete_id: athleteId, rpe_post: selected },
-        { onConflict: "workout_id,athlete_id" }
-      );
-    setSaving(false);
+    try {
+      if (onSaveAttendance) {
+        await onSaveAttendance({ workoutId, athleteId, rpePost: selected });
+      } else {
+        await supabase
+          .from("attendance")
+          .upsert(
+            { workout_id: workoutId, athlete_id: athleteId, rpe_post: selected },
+            { onConflict: "workout_id,athlete_id" }
+          );
+      }
+    } finally {
+      setSaving(false);
+    }
     setSaved(true);
     setTimeout(onDone, 1200);
   }
@@ -444,12 +453,14 @@ export function WorkoutLogger({
   athleteId,
   attendanceId,
   onSaveSet,
+  onSaveAttendance,
 }: {
   workout: Workout;
   exercises: Exercise[];
   athleteId: string;
   attendanceId?: string | null;
   onSaveSet?: SaveSetFn;
+  onSaveAttendance?: (params: { workoutId: string; athleteId: string; rpePost: number }) => Promise<void>;
 }) {
   const totalSets = exercises.reduce((sum, e) => sum + (e.override?.sets ?? e.sets ?? 1), 0);
   const [showRPEPrompt, setShowRPEPrompt] = useState(false);
@@ -509,6 +520,7 @@ export function WorkoutLogger({
               workoutId={workout.id}
               athleteId={athleteId}
               onDone={() => setShowRPEPrompt(false)}
+              onSaveAttendance={onSaveAttendance}
             />
           </CardContent>
         </Card>
