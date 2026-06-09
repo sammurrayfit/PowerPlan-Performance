@@ -25,7 +25,9 @@ export async function createCalendar(formData: FormData) {
 
 export async function deleteCalendar(id: string) {
   const supabase = await createClient();
-  await supabase.from("calendars").delete().eq("id", id);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  await supabase.from("calendars").delete().eq("id", id).eq("coach_id", user.id);
   revalidatePath("/coach/calendar");
 }
 
@@ -52,12 +54,21 @@ export async function createWorkout(formData: FormData) {
 
 export async function updateWorkout(id: string, updates: { title?: string; notes?: string | null; is_locked?: boolean }) {
   const supabase = await createClient();
-  await supabase.from("workouts").update(updates).eq("id", id);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  const { data: calendars } = await supabase.from("calendars").select("id").eq("coach_id", user.id);
+  const calIds = (calendars ?? []).map((c) => c.id);
+  if (calIds.length === 0) throw new Error("Not authorized");
+  await supabase.from("workouts").update(updates).eq("id", id).in("calendar_id", calIds);
 }
 
 export async function deleteWorkout(id: string, calendarId: string) {
   const supabase = await createClient();
-  await supabase.from("workouts").delete().eq("id", id);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  const { data: cal } = await supabase.from("calendars").select("coach_id").eq("id", calendarId).single();
+  if (!cal || cal.coach_id !== user.id) throw new Error("Not authorized");
+  await supabase.from("workouts").delete().eq("id", id).eq("calendar_id", calendarId);
   redirect(`/coach/calendar/${calendarId}`);
 }
 

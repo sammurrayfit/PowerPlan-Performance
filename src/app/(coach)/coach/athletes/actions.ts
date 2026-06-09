@@ -110,7 +110,16 @@ export async function addMax(athleteId: string, exerciseId: string, value: numbe
 
 export async function deleteMax(maxId: string, athleteId: string) {
   const supabase = await createClient();
-  await supabase.from("maxes").delete().eq("id", maxId);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  const { data: teams } = await supabase.from("teams").select("id").eq("coach_id", user.id);
+  const teamIds = (teams ?? []).map((t) => t.id);
+  const { data: membership } = teamIds.length > 0
+    ? await supabase.from("team_memberships").select("athlete_id").eq("athlete_id", athleteId).in("team_id", teamIds).maybeSingle()
+    : { data: null };
+  const { data: directCal } = await supabase.from("calendars").select("id").eq("coach_id", user.id).eq("athlete_id", athleteId).maybeSingle();
+  if (!membership && !directCal) throw new Error("Not authorized");
+  await supabase.from("maxes").delete().eq("id", maxId).eq("athlete_id", athleteId);
   revalidatePath(`/coach/athletes/${athleteId}`);
 }
 
