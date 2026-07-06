@@ -223,7 +223,7 @@ function ExerciseRow({
         <button
           onClick={() => onCopy(row.id)}
           title="Duplicate exercise"
-          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all"
+          className="text-muted-foreground hover:text-foreground transition-colors"
         >
           <Copy className="h-4 w-4" />
         </button>
