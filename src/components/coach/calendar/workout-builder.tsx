@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { GripVertical, Plus, Trash2, Lock, Unlock, Star, ChevronLeft, ChevronRight } from "lucide-react";
+import { GripVertical, Plus, Trash2, Lock, Unlock, Star, ChevronLeft, ChevronRight, Copy } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { updateWorkout, deleteWorkout } from "@/app/(coach)/coach/calendar/actions";
 import { ExercisePicker } from "./exercise-picker";
@@ -93,10 +93,12 @@ function ExerciseRow({
   row,
   onUpdate,
   onDelete,
+  onCopy,
 }: {
   row: WorkoutExerciseRow;
   onUpdate: (id: string, field: string, value: unknown) => void;
   onDelete: (id: string) => void;
+  onCopy: (id: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: row.id });
 
@@ -217,6 +219,15 @@ function ExerciseRow({
           <Star className="h-4 w-4" fill={row.is_pr_tracking ? "currentColor" : "none"} />
         </button>
       </td>
+      <td className="px-1 py-1 w-10">
+        <button
+          onClick={() => onCopy(row.id)}
+          title="Duplicate exercise"
+          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all"
+        >
+          <Copy className="h-4 w-4" />
+        </button>
+      </td>
       <td className="px-2 py-1 w-10">
         <button
           onClick={() => onDelete(row.id)}
@@ -267,6 +278,47 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
       toast.error("Failed to save — change was not saved");
     }
   }, [supabase, exercises]);
+
+  const handleCopy = useCallback(async (id: string) => {
+    const original = exercises.find((r) => r.id === id);
+    if (!original) return;
+
+    const { data, error } = await supabase
+      .from("workout_exercises")
+      .insert({
+        workout_id: workout.id,
+        exercise_id: original.exercise_id,
+        sort_order: original.sort_order + 1,
+        sets: original.sets,
+        reps: original.reps,
+        load: original.load,
+        load_type: original.load_type,
+        tempo: original.tempo,
+        rest_seconds: original.rest_seconds,
+        notes: original.notes,
+        is_pr_tracking: original.is_pr_tracking,
+        superset_group: original.superset_group,
+      })
+      .select("id")
+      .single();
+
+    if (error || !data) {
+      toast.error("Failed to duplicate exercise");
+      return;
+    }
+
+    const newRow: WorkoutExerciseRow = { ...original, id: data.id };
+    const index = exercises.findIndex((r) => r.id === id);
+    const updated = [...exercises.slice(0, index + 1), newRow, ...exercises.slice(index + 1)].map((e, i) => ({
+      ...e,
+      sort_order: i,
+    }));
+    setExercises(updated);
+
+    await Promise.all(
+      updated.map((e) => supabase.from("workout_exercises").update({ sort_order: e.sort_order }).eq("id", e.id))
+    );
+  }, [supabase, exercises, workout.id]);
 
   const handleDelete = useCallback(async (id: string) => {
     const prev = exercises.find((r) => r.id === id);
@@ -598,6 +650,7 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
                     <th className="px-2 py-2 text-left">Notes</th>
                     <th className="px-2 py-2 w-10" title="PR Tracking">PR</th>
                     <th className="w-10" />
+                    <th className="w-10" />
                   </tr>
                 </thead>
                 <SortableContext items={exercises.map((e) => e.id)} strategy={verticalListSortingStrategy}>
@@ -608,6 +661,7 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
                         row={row}
                         onUpdate={handleUpdate}
                         onDelete={handleDelete}
+                        onCopy={handleCopy}
                       />
                     ))}
                   </tbody>
