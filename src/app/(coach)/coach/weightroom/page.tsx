@@ -70,20 +70,46 @@ export default async function WeightroomPage({ searchParams }: Props) {
     calendarAthletes[cal.id] = [...new Set(ids)];
   }
 
-  const workoutsWithAthletes = (workouts ?? []).map((w) => ({
-    id: w.id,
-    title: w.title,
-    date: w.date,
-    calendarId: w.calendar_id,
-    athleteIds: calendarAthletes[w.calendar_id] ?? [],
-  }));
+  // Group workouts by title — per-athlete calendars create one workout per athlete,
+  // so we merge them into a single entry per program with a per-athlete workout ID map.
+  const groupMap = new Map<string, {
+    id: string;
+    title: string;
+    date: string;
+    calendarId: string;
+    athleteIds: string[];
+    workoutIdByAthlete: Record<string, string>;
+  }>();
 
+  for (const w of workouts ?? []) {
+    if (w.title === "Pre-Activation") continue;
+    const athletes = calendarAthletes[w.calendar_id] ?? [];
+    if (!groupMap.has(w.title)) {
+      groupMap.set(w.title, {
+        id: w.id,
+        title: w.title,
+        date: w.date,
+        calendarId: w.calendar_id,
+        athleteIds: [],
+        workoutIdByAthlete: {},
+      });
+    }
+    const group = groupMap.get(w.title)!;
+    for (const athleteId of athletes) {
+      if (!group.athleteIds.includes(athleteId)) {
+        group.athleteIds.push(athleteId);
+        group.workoutIdByAthlete[athleteId] = w.id;
+      }
+    }
+  }
+
+  const mergedWorkouts = Array.from(groupMap.values());
   const profiles = (allProfiles ?? []) as { id: string; full_name: string }[];
 
   return (
     <div className="space-y-5">
       <DateNav date={date} today={today} />
-      <AthleteKiosk key={date} workouts={workoutsWithAthletes} profiles={profiles} date={date} />
+      <AthleteKiosk key={date} workouts={mergedWorkouts} profiles={profiles} date={date} />
     </div>
   );
 }

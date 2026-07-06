@@ -66,6 +66,10 @@ function overrideLabel(o: Override) {
   return parts.join(" ") || "—";
 }
 
+function isSkipOverride(o: Override) {
+  return o.sets == null && o.reps == null && o.load == null;
+}
+
 interface EditState {
   weId: string;
   athleteId: string;
@@ -297,20 +301,29 @@ export function Individualization({ exercises, athletes, initialOverrides, maxes
                       ? Math.round(athleteMax * effectiveLoad / 100)
                       : null;
 
+                    const isSkip = override ? isSkipOverride(override) : false;
+
                     return (
                       <td key={we.id} className="px-3 py-2">
                         <button
                           onClick={() => openEdit(we, athlete)}
                           className={`w-full text-left px-2 py-1 rounded text-xs transition-colors ${
-                            override
+                            isSkip
+                              ? "text-muted-foreground/40 hover:bg-muted"
+                              : override
                               ? "bg-primary/10 text-primary font-medium hover:bg-primary/20"
                               : "text-muted-foreground hover:bg-muted"
                           }`}
                         >
-                          {override ? overrideLabel(override) : "—"}
-                          {calcLbs && (
+                          {isSkip ? "✕" : override ? overrideLabel(override) : "—"}
+                          {!isSkip && calcLbs && (
                             <span className="block text-[10px] text-muted-foreground font-normal">
                               = {calcLbs} lbs
+                            </span>
+                          )}
+                          {!isSkip && override?.notes && (
+                            <span className="block text-[10px] text-blue-600 font-normal truncate max-w-[130px]" title={override.notes}>
+                              {override.notes}
                             </span>
                           )}
                         </button>

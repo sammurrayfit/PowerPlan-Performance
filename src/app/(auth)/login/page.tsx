@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+import { loginAction } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,15 +24,12 @@ export default function LoginPage() {
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const error = await loginAction(email, password);
     if (error) {
-      toast.error(error.message);
-    } else {
-      router.push("/");
-      router.refresh();
+      toast.error(error);
+      setLoading(false);
     }
-    setLoading(false);
+    // on success, loginAction redirects server-side — no client navigation needed
   }
 
   async function handleResetPassword(e: React.FormEvent) {

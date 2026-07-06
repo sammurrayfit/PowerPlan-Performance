@@ -123,6 +123,25 @@ export async function deleteMax(maxId: string, athleteId: string) {
   revalidatePath(`/coach/athletes/${athleteId}`);
 }
 
+export async function deleteTeam(teamId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: team } = await supabase
+    .from("teams")
+    .select("coach_id")
+    .eq("id", teamId)
+    .single();
+  if (!team || team.coach_id !== user.id) throw new Error("Not authorized");
+
+  await supabase.from("team_memberships").delete().eq("team_id", teamId);
+  const { error } = await supabase.from("teams").delete().eq("id", teamId);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/coach/athletes");
+}
+
 export async function createTeam(name: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

@@ -40,7 +40,7 @@ export default async function AthleteDashboard() {
       .eq("date", today)
       .in("calendar_id", calendarIds)
       .order("created_at");
-    todayWorkouts = data ?? [];
+    todayWorkouts = (data ?? []).filter((w) => w.title !== "Pre-Activation");
   }
 
   return (

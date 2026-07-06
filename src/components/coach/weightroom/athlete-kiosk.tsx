@@ -12,6 +12,7 @@ interface WorkoutOption {
   date: string;
   calendarId: string;
   athleteIds: string[];
+  workoutIdByAthlete?: Record<string, string>;
 }
 
 interface Profile {
@@ -27,6 +28,7 @@ interface Props {
 
 type ActiveSession = {
   athlete: Profile;
+  workoutId: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   exerciseData: any[];
   celebrating: boolean;
@@ -120,7 +122,7 @@ function AthletePanel({
       {/* Workout logger */}
       <div className="overflow-y-auto">
         <WorkoutLogger
-          workout={{ ...workout, notes: null, is_locked: false }}
+          workout={{ ...workout, id: session.workoutId, notes: null, is_locked: false }}
           exercises={session.exerciseData}
           athleteId={session.athlete.id}
           onSaveSet={saveKioskSet}
@@ -149,12 +151,13 @@ export function AthleteKiosk({ workouts, profiles, date }: Props) {
     if (!selectedWorkout) return;
     if (activeSessions.some((s) => s.athlete.id === athlete.id)) return; // already open
 
+    const workoutId = selectedWorkout.workoutIdByAthlete?.[athlete.id] ?? selectedWorkout.id;
     setLoadingIds((prev) => new Set(prev).add(athlete.id));
     try {
-      const data = await fetchAthleteWorkoutData(selectedWorkout.id, athlete.id);
+      const data = await fetchAthleteWorkoutData(workoutId, athlete.id);
       setActiveSessions((prev) => [
         ...prev,
-        { athlete, exerciseData: data, celebrating: false },
+        { athlete, workoutId, exerciseData: data, celebrating: false },
       ]);
     } finally {
       setLoadingIds((prev) => {
@@ -173,9 +176,10 @@ export function AthleteKiosk({ workouts, profiles, date }: Props) {
   // Done: re-fetch → if all sets logged show celebration, else just close
   async function handleDone(athleteId: string) {
     if (!selectedWorkout) return;
+    const workoutId = selectedWorkout.workoutIdByAthlete?.[athleteId] ?? selectedWorkout.id;
     setDoneLoadingIds((prev) => new Set(prev).add(athleteId));
     try {
-      const fresh = await fetchAthleteWorkoutData(selectedWorkout.id, athleteId);
+      const fresh = await fetchAthleteWorkoutData(workoutId, athleteId);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const totalSets = (fresh as any[]).reduce((sum, e) => sum + (e.sets ?? 0), 0);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

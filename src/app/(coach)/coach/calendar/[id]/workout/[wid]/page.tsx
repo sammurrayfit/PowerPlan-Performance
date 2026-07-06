@@ -5,13 +5,15 @@ import { AttendancePanel } from "@/components/coach/calendar/attendance-panel";
 
 interface Props {
   params: Promise<{ id: string; wid: string }>;
+  searchParams: Promise<{ athlete?: string; back?: string }>;
 }
 
-export default async function WorkoutPage({ params }: Props) {
+export default async function WorkoutPage({ params, searchParams }: Props) {
   const { id, wid } = await params;
+  const { athlete: athleteFilter, back: backUrl } = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: workout }, { data: rawExercises }, { data: allExercises }, { data: calendar }] = await Promise.all([
+  const [{ data: workout }, { data: rawExercises }, { data: allExercises }, { data: calendar }, { data: siblingWorkouts }] = await Promise.all([
     supabase.from("workouts").select("*").eq("id", wid).single(),
     supabase
       .from("workout_exercises")
@@ -20,15 +22,44 @@ export default async function WorkoutPage({ params }: Props) {
       .order("sort_order"),
     supabase.from("exercises").select("id, name, category_id, muscle_groups").order("name"),
     supabase.from("calendars").select("team_id").eq("id", id).single(),
+    supabase.from("workouts").select("id, date").eq("calendar_id", id).order("date"),
   ]);
 
   if (!workout || workout.calendar_id !== id) notFound();
 
+  const workoutList = siblingWorkouts ?? [];
+  const currentIdx = workoutList.findIndex((w) => w.id === wid);
+  const prevWorkoutId = currentIdx > 0 ? workoutList[currentIdx - 1].id : null;
+  const nextWorkoutId = currentIdx < workoutList.length - 1 ? workoutList[currentIdx + 1].id : null;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const exercises = (rawExercises ?? []).map((e: any) => ({
+  let exercises = (rawExercises ?? []).map((e: any) => ({
     ...e,
     exercise_name: (e.exercises as { name: string } | null)?.name ?? "",
   }));
+
+  // If navigating from an athlete's profile, filter to only their exercises
+  if (athleteFilter) {
+    const { data: athleteOverrides } = await supabase
+      .from("athlete_exercise_overrides")
+      .select("workout_exercise_id, sets, reps, load, notes")
+      .eq("athlete_id", athleteFilter)
+      .in("workout_exercise_id", exercises.map((e) => e.id));
+
+    if (athleteOverrides && athleteOverrides.length > 0) {
+      // Keep only exercises where the athlete has a non-skip override (sets or reps set)
+      const overrideByWeId = new Map(athleteOverrides.map((o) => [o.workout_exercise_id, o]));
+      const activeWeIds = new Set(
+        athleteOverrides
+          .filter((o) => o.sets != null || o.reps != null)
+          .map((o) => o.workout_exercise_id)
+      );
+      exercises = exercises
+        .filter((e) => activeWeIds.has(e.id))
+        .map((e) => ({ ...e, notes: overrideByWeId.get(e.id)?.notes ?? e.notes }));
+    }
+  }
+
   const exerciseIds = exercises.map((e) => e.id);
   const baseExerciseIds: string[] = exercises.map((e) => e.exercise_id).filter(Boolean);
 
@@ -113,6 +144,9 @@ export default async function WorkoutPage({ params }: Props) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         initialOverrides={initialOverrides as any[]}
         maxesMap={maxesMap}
+        prevWorkoutId={prevWorkoutId}
+        nextWorkoutId={nextWorkoutId}
+        backUrl={backUrl ?? null}
       />
       {athletes.length > 0 && (
         <div className="border-t pt-6">

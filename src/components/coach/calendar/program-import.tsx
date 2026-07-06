@@ -129,7 +129,8 @@ function parseProgram(workbook: import("xlsx").WorkBook, athletes: Athlete[]): P
         loadType:    parseLoadType(loadTypeRaw),
         tempo:       col.tempo >= 0 ? String(row[col.tempo] ?? "").trim() || null : null,
         restSeconds: col.rest >= 0 && row[col.rest] !== "" ? Number(row[col.rest]) || null : null,
-        notes:       col.notes >= 0 ? String(row[col.notes] ?? "").trim() || null : null,
+        // Strip notes from C superset (core/accessory block) — asymmetry callouts don't belong there
+        notes:       col.notes >= 0 && supersetRaw !== "C" ? String(row[col.notes] ?? "").trim() || null : null,
       });
     }
 
@@ -199,23 +200,40 @@ export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
     const { data: exData } = await supabase.from("exercises").select("id, name");
     let allExercises: { id: string; name: string }[] = exData ?? [];
 
-    // ── Step 1: Build the union of all workouts across every sheet ──────────
-    // workoutMap: `${date}||${title}` → ordered list of unique exercises (first occurrence = base)
+    async function findOrCreateExercise(name: string): Promise<{ id: string; name: string } | null> {
+      let match = allExercises.find((e) => e.name.toLowerCase() === name.toLowerCase());
+      if (!match) match = allExercises.find((e) =>
+        e.name.toLowerCase().includes(name.toLowerCase()) ||
+        name.toLowerCase().includes(e.name.toLowerCase())
+      );
+      if (!match) {
+        const { data: created } = await supabase
+          .from("exercises")
+          .insert({ name, is_public: false, created_by: user!.id })
+          .select("id, name").single();
+        if (created) { match = created; allExercises.push(created); }
+      }
+      return match ?? null;
+    }
+
+    // ── Step 1: Build the union of all MAIN workouts across every sheet ──────
+    // Pre-activation rows are excluded from the team workout entirely.
+    // workoutMap: `${date}||${title}` → ordered list of unique exercises
     const workoutMap = new Map<string, SheetExercise[]>();
     for (const sheet of program.sheets) {
       for (const row of sheet.rows) {
+        if (row.workoutTitle === "Pre-Activation") continue;
         const key = `${row.date}||${row.workoutTitle}`;
         if (!workoutMap.has(key)) workoutMap.set(key, []);
         const existing = workoutMap.get(key)!;
         const nameLower = row.exerciseName.toLowerCase();
         if (!existing.some((e) => e.exerciseName.toLowerCase() === nameLower)) {
-          existing.push(row); // first occurrence becomes the base prescription
+          existing.push(row);
         }
       }
     }
 
-    // ── Step 2: Create workouts + base workout_exercises ────────────────────
-    // weIndex: `${date}||${exerciseName_lower}` → workout_exercise_id
+    // ── Step 2: Create main workouts + base workout_exercises (unchanged) ────
     const weIndex = new Map<string, string>();
 
     for (const [key, baseExercises] of workoutMap) {
@@ -233,19 +251,7 @@ export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
 
       for (let i = 0; i < baseExercises.length; i++) {
         const ex = baseExercises[i];
-
-        let match = allExercises.find((e) => e.name.toLowerCase() === ex.exerciseName.toLowerCase());
-        if (!match) match = allExercises.find((e) =>
-          e.name.toLowerCase().includes(ex.exerciseName.toLowerCase()) ||
-          ex.exerciseName.toLowerCase().includes(e.name.toLowerCase())
-        );
-        if (!match) {
-          const { data: created } = await supabase
-            .from("exercises")
-            .insert({ name: ex.exerciseName, is_public: false, created_by: user.id })
-            .select("id, name").single();
-          if (created) { match = created; allExercises.push(created); }
-        }
+        const match = await findOrCreateExercise(ex.exerciseName);
         if (!match) continue;
 
         const { data: we } = await supabase
@@ -269,12 +275,13 @@ export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
       }
     }
 
-    // ── Step 3: Create per-athlete overrides from every matched sheet ────────
+    // ── Step 3: Per-athlete overrides for main exercises only ────────────────
     for (const sheet of program.sheets) {
       if (!sheet.athleteId) continue;
       setProgress(`Applying overrides for ${sheet.sheetName}…`);
 
       for (const row of sheet.rows) {
+        if (row.workoutTitle === "Pre-Activation") continue;
         const weId = weIndex.get(`${row.date}||${row.exerciseName.toLowerCase()}`);
         if (!weId) continue;
 
@@ -293,6 +300,81 @@ export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
       }
     }
 
+    // ── Step 4: Per-athlete pre-activation (stored in individual calendars) ──
+    // Each athlete gets their own "Pre-Activation" calendar so the team workout
+    // is never polluted. The athlete's workout page fetches and renders these
+    // above the main lift.
+    const athleteCalendarCache = new Map<string, string>(); // athleteId → calendarId
+
+    for (const sheet of program.sheets) {
+      if (!sheet.athleteId) continue;
+      const preActRows = sheet.rows.filter((r) => r.workoutTitle === "Pre-Activation");
+      if (preActRows.length === 0) continue;
+
+      setProgress(`Creating pre-activation for ${sheet.sheetName}…`);
+
+      // Find or create this athlete's personal pre-activation calendar
+      let preActCalId = athleteCalendarCache.get(sheet.athleteId);
+      if (!preActCalId) {
+        const { data: existing } = await supabase
+          .from("calendars")
+          .select("id")
+          .eq("athlete_id", sheet.athleteId)
+          .eq("coach_id", user!.id)
+          .eq("name", "Pre-Activation")
+          .maybeSingle();
+
+        if (existing) {
+          preActCalId = existing.id;
+        } else {
+          const { data: created } = await supabase
+            .from("calendars")
+            .insert({ athlete_id: sheet.athleteId, coach_id: user!.id, name: "Pre-Activation", color: "#f59e0b" })
+            .select("id")
+            .single();
+          preActCalId = created?.id ?? undefined;
+        }
+        if (preActCalId) athleteCalendarCache.set(sheet.athleteId, preActCalId);
+      }
+      if (!preActCalId) continue;
+
+      // Group by date and create a workout per date
+      const byDate = new Map<string, SheetExercise[]>();
+      for (const row of preActRows) {
+        if (!byDate.has(row.date)) byDate.set(row.date, []);
+        byDate.get(row.date)!.push(row);
+      }
+
+      for (const [date, rows] of byDate) {
+        const { data: w } = await supabase
+          .from("workouts")
+          .insert({ calendar_id: preActCalId, date, title: "Pre-Activation" })
+          .select("id")
+          .single();
+        if (!w) continue;
+
+        for (let i = 0; i < rows.length; i++) {
+          const ex = rows[i];
+          const match = await findOrCreateExercise(ex.exerciseName);
+          if (!match) continue;
+          await supabase.from("workout_exercises").insert({
+            workout_id: w.id,
+            exercise_id: match.id,
+            sort_order: i,
+            sets: ex.sets,
+            reps: ex.reps,
+            load: ex.load,
+            load_type: ex.loadType,
+            tempo: ex.tempo,
+            rest_seconds: ex.restSeconds,
+            notes: ex.notes,
+            superset_group: ex.supersetGroup,
+            is_pre_activation: true,
+          });
+        }
+      }
+    }
+
     setImporting(false);
     setDialogOpen(false);
     setProgram(null);
@@ -303,7 +385,7 @@ export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
   const totalRows = program?.sheets.reduce((n, s) => n + s.rows.length, 0) ?? 0;
   const unmatchedSheets = program?.sheets.filter((s) => !s.athleteId).map((s) => s.sheetName) ?? [];
   const uniqueWorkouts = program
-    ? new Set(program.sheets.flatMap((s) => s.rows.map((r) => `${r.date}||${r.workoutTitle}`))).size
+    ? new Set(program.sheets.flatMap((s) => s.rows.filter((r) => r.workoutTitle !== "Pre-Activation").map((r) => `${r.date}||${r.workoutTitle}`))).size
     : 0;
 
   return (

@@ -113,7 +113,7 @@ export async function saveKioskAttendance(params: {
 export async function fetchAthleteWorkoutData(workoutId: string, athleteId: string) {
   const supabase = await createClient();
 
-  const [{ data: rawExercises }, { data: logsRaw }] = await Promise.all([
+  const [{ data: rawExercises }, { data: logsRaw }, { data: workoutRow }] = await Promise.all([
     supabase
       .from("workout_exercises")
       .select("*, exercises(id, name, video_url, image_url)")
@@ -124,7 +124,71 @@ export async function fetchAthleteWorkoutData(workoutId: string, athleteId: stri
       .select("*")
       .eq("workout_id", workoutId)
       .eq("athlete_id", athleteId),
+    supabase.from("workouts").select("date").eq("id", workoutId).single(),
   ]);
+
+  // Fetch pre-activation exercises for this athlete on the same date
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let preActivationExercises: any[] = [];
+  if (workoutRow?.date) {
+    const { data: preCalendars } = await supabase
+      .from("calendars")
+      .select("id")
+      .eq("athlete_id", athleteId)
+      .eq("name", "Pre-Activation");
+    const preCalIds = (preCalendars ?? []).map((c) => c.id);
+    if (preCalIds.length > 0) {
+      const { data: preWorkout } = await supabase
+        .from("workouts")
+        .select("id")
+        .in("calendar_id", preCalIds)
+        .eq("date", workoutRow.date)
+        .eq("title", "Pre-Activation")
+        .maybeSingle();
+      if (preWorkout) {
+        const [{ data: preExercises }, { data: preLogs }] = await Promise.all([
+          supabase
+            .from("workout_exercises")
+            .select("*, exercises(id, name, video_url, image_url)")
+            .eq("workout_id", preWorkout.id)
+            .order("sort_order"),
+          supabase
+            .from("exercise_logs")
+            .select("*")
+            .eq("workout_id", preWorkout.id)
+            .eq("athlete_id", athleteId),
+        ]);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const preLogsMap: Record<string, any[]> = {};
+        for (const l of preLogs ?? []) {
+          if (!preLogsMap[l.workout_exercise_id]) preLogsMap[l.workout_exercise_id] = [];
+          preLogsMap[l.workout_exercise_id].push(l);
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        preActivationExercises = (preExercises ?? []).map((e: any) => ({
+          id: e.id,
+          exercise_id: e.exercise_id,
+          exercise_name: (e.exercises as { name: string } | null)?.name ?? "Unknown",
+          video_url: (e.exercises as { video_url: string | null } | null)?.video_url ?? null,
+          image_url: (e.exercises as { image_url: string | null } | null)?.image_url ?? null,
+          sort_order: e.sort_order,
+          sets: e.sets,
+          reps: e.reps,
+          load: e.load,
+          load_type: e.load_type,
+          tempo: e.tempo,
+          rest_seconds: e.rest_seconds,
+          notes: e.notes,
+          superset_group: e.superset_group ?? null,
+          is_pre_activation: true,
+          override: null,
+          max: null,
+          logs: preLogsMap[e.id] ?? [],
+          previousSession: null,
+        }));
+      }
+    }
+  }
 
   const exercises = rawExercises ?? [];
   const weIds = exercises.map((e) => e.id);
@@ -215,7 +279,7 @@ export async function fetchAthleteWorkoutData(workoutId: string, athleteId: stri
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return exercises.map((e: any) => ({
+  const mainExercises = exercises.map((e: any) => ({
     id: e.id,
     exercise_id: e.exercise_id,
     exercise_name: (e.exercises as { name: string } | null)?.name ?? "Unknown",
@@ -230,11 +294,14 @@ export async function fetchAthleteWorkoutData(workoutId: string, athleteId: stri
     rest_seconds: e.rest_seconds,
     notes: e.notes,
     superset_group: e.superset_group ?? null,
+    is_pre_activation: false,
     override: overridesMap[e.id] ?? null,
     max: e.exercise_id ? (maxesMap[e.exercise_id] ?? null) : null,
     logs: logsMap[e.id] ?? [],
     previousSession: e.exercise_id ? (prevSessionByExId[e.exercise_id] ?? null) : null,
   }));
+
+  return [...preActivationExercises, ...mainExercises];
 }
 
 // ── Multi-athlete (coach monitoring panel) ────────────────────────────────────

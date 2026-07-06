@@ -7,7 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, Circle, ChevronDown, ChevronUp, Play, Flag } from "lucide-react";
+import { CheckCircle2, Circle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Play, Flag, Zap, Dumbbell } from "lucide-react";
+import Link from "next/link";
 import { RPE_LABELS, RPE_OPTIONS } from "@/lib/rpe";
 
 interface Override {
@@ -48,6 +49,7 @@ interface Exercise {
   rest_seconds: number | null;
   notes: string | null;
   superset_group: string | null;
+  is_pre_activation: boolean;
   override: Override | null;
   max: number | null;
   logs: ExerciseLog[];
@@ -60,6 +62,8 @@ interface Workout {
   date: string;
   notes: string | null;
   is_locked: boolean;
+  prevWorkoutId?: string | null;
+  nextWorkoutId?: string | null;
 }
 
 interface SetRow {
@@ -201,7 +205,7 @@ function ExerciseCard({
       <CardHeader className="pb-2 pt-4 px-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 flex-wrap">
-            {exercise.superset_group && (
+            {exercise.superset_group && !exercise.is_pre_activation && (
               <span
                 className="text-xs font-bold px-1.5 py-0.5 rounded"
                 style={{
@@ -462,13 +466,43 @@ export function WorkoutLogger({
   onSaveSet?: SaveSetFn;
   onSaveAttendance?: (params: { workoutId: string; athleteId: string; rpePost: number }) => Promise<void>;
 }) {
-  const totalSets = exercises.reduce((sum, e) => sum + (e.override?.sets ?? e.sets ?? 1), 0);
   const [showRPEPrompt, setShowRPEPrompt] = useState(false);
+
+  const preActivationExercises = exercises.filter((e) => e.is_pre_activation);
+  const mainExercises = exercises.filter((e) => !e.is_pre_activation);
+  const hasPreActivation = preActivationExercises.length > 0;
+  const totalSets = mainExercises.reduce((sum, e) => sum + (e.override?.sets ?? e.sets ?? 1), 0);
 
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-bold">{workout.title}</h1>
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="text-xl font-bold">{workout.title}</h1>
+          <div className="flex items-center gap-1 shrink-0">
+            {workout.prevWorkoutId ? (
+              <Link href={`/athlete/workout/${workout.prevWorkoutId}`}>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Previous workout">
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+              </Link>
+            ) : (
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 opacity-30" disabled>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+            )}
+            {workout.nextWorkoutId ? (
+              <Link href={`/athlete/workout/${workout.nextWorkoutId}`}>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Next workout">
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </Link>
+            ) : (
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 opacity-30" disabled>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        </div>
         <p className="text-sm text-muted-foreground">
           {new Date(workout.date + "T00:00:00").toLocaleDateString("en-US", {
             weekday: "long",
@@ -478,7 +512,8 @@ export function WorkoutLogger({
         </p>
         {workout.notes && <p className="text-sm mt-1">{workout.notes}</p>}
         <p className="text-xs text-muted-foreground mt-1">
-          {exercises.length} exercise{exercises.length !== 1 ? "s" : ""} · {totalSets} total sets
+          {mainExercises.length} exercise{mainExercises.length !== 1 ? "s" : ""} · {totalSets} total sets
+          {hasPreActivation && ` · ${preActivationExercises.length} activation`}
         </p>
       </div>
 
@@ -492,7 +527,40 @@ export function WorkoutLogger({
           </Card>
         ) : (
           <div className="space-y-3">
-            {exercises.map((ex) => (
+            {hasPreActivation && (
+              <>
+                {/* Pre-Activation section */}
+                <div className="flex items-center gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/20">
+                  <Zap className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Pre-Activation</p>
+                    <p className="text-xs text-amber-700/70 dark:text-amber-500">Complete before training</p>
+                  </div>
+                </div>
+                {preActivationExercises.map((ex) => (
+                  <ExerciseCard
+                    key={ex.id}
+                    exercise={ex}
+                    athleteId={athleteId}
+                    workoutId={workout.id}
+                    onSaveSet={onSaveSet}
+                  />
+                ))}
+                {/* Divider before main lift */}
+                <div className="flex items-center gap-3 py-2">
+                  <div className="flex-1 h-1.5 rounded-full bg-amber-400" />
+                  <div className="flex flex-col items-center gap-0.5">
+                    <div className="flex items-center gap-2 text-lg font-bold text-amber-700 dark:text-amber-400">
+                      <Dumbbell className="h-5 w-5" />
+                      <span>{workout.title}</span>
+                    </div>
+                    <span className="text-sm text-amber-600/70 dark:text-amber-500">(post training)</span>
+                  </div>
+                  <div className="flex-1 h-1.5 rounded-full bg-amber-400" />
+                </div>
+              </>
+            )}
+            {mainExercises.map((ex) => (
               <ExerciseCard
                 key={ex.id}
                 exercise={ex}

@@ -22,9 +22,10 @@ import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { GripVertical, Plus, Trash2, Lock, Unlock, Star } from "lucide-react";
+import { GripVertical, Plus, Trash2, Lock, Unlock, Star, ChevronLeft, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { updateWorkout, deleteWorkout } from "@/app/(coach)/coach/calendar/actions";
 import { ExercisePicker } from "./exercise-picker";
@@ -81,6 +82,9 @@ interface WorkoutBuilderProps {
   athletes?: Athlete[];
   initialOverrides?: Override[];
   maxesMap?: Record<string, Record<string, number>>;
+  prevWorkoutId?: string | null;
+  nextWorkoutId?: string | null;
+  backUrl?: string | null;
 }
 
 const LOAD_TYPE_LABELS = { absolute: "lbs", percent_1rm: "%", bodyweight: "BW" };
@@ -227,7 +231,7 @@ function ExerciseRow({
 
 type Tab = "prescription" | "individualize";
 
-export function WorkoutBuilder({ workout, initialExercises, allExercises, calendarId, athletes = [], initialOverrides = [], maxesMap = {} }: WorkoutBuilderProps) {
+export function WorkoutBuilder({ workout, initialExercises, allExercises, calendarId, athletes = [], initialOverrides = [], maxesMap = {}, prevWorkoutId = null, nextWorkoutId = null, backUrl = null }: WorkoutBuilderProps) {
   const supabase = createClient();
   const [exercises, setExercises] = useState<WorkoutExerciseRow[]>(initialExercises);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -235,6 +239,17 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
   const [title, setTitle] = useState(workout.title);
   const [notes, setNotes] = useState(workout.notes ?? "");
   const [activeTab, setActiveTab] = useState<Tab>("prescription");
+  const [viewAthleteId, setViewAthleteId] = useState<string>("");
+
+  const overrideByWeAndAthlete = new Map<string, Override>();
+  for (const o of initialOverrides) overrideByWeAndAthlete.set(`${o.workout_exercise_id}|${o.athlete_id}`, o);
+
+  const displayedExercises = viewAthleteId
+    ? exercises
+        .map((e) => ({ e, override: overrideByWeAndAthlete.get(`${e.id}|${viewAthleteId}`) }))
+        .filter(({ override }) => override && (override.sets != null || override.reps != null))
+        .map(({ e, override }) => ({ ...e, notes: override!.notes ?? e.notes }))
+    : exercises;
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -424,9 +439,35 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
       {/* Header */}
       <div className="flex items-start gap-4">
         <div className="flex-1 space-y-2">
-          <Link href={`/coach/calendar/${calendarId}`} className="text-sm text-muted-foreground hover:text-foreground">
-            ← Calendar
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link href={backUrl ?? `/coach/calendar/${calendarId}`} className="text-sm text-muted-foreground hover:text-foreground">
+              {backUrl ? "← Athletes" : "← Calendar"}
+            </Link>
+            <div className="flex items-center gap-1 ml-auto">
+              {prevWorkoutId ? (
+                <Link href={`/coach/calendar/${calendarId}/workout/${prevWorkoutId}`}>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Previous workout">
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                </Link>
+              ) : (
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 opacity-30" disabled title="No previous workout">
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+              )}
+              {nextWorkoutId ? (
+                <Link href={`/coach/calendar/${calendarId}/workout/${nextWorkoutId}`}>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Next workout">
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </Link>
+              ) : (
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 opacity-30" disabled title="No next workout">
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
           <Input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -487,8 +528,60 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
 
       {activeTab === "prescription" && (
         <>
-          {/* Exercise table */}
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          {athletes.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Label className="text-sm text-muted-foreground shrink-0">View as</Label>
+              <select
+                value={viewAthleteId}
+                onChange={(e) => setViewAthleteId(e.target.value)}
+                className="h-8 rounded border border-input bg-background px-2 text-sm"
+              >
+                <option value="">All athletes (combined)</option>
+                {athletes.map((a) => (
+                  <option key={a.id} value={a.id}>{a.full_name}</option>
+                ))}
+              </select>
+              {viewAthleteId && (
+                <span className="text-xs text-muted-foreground">
+                  Read-only — edit via the Individualize tab
+                </span>
+              )}
+            </div>
+          )}
+
+          {viewAthleteId ? (
+            <div className="rounded-lg border overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-xs text-muted-foreground uppercase tracking-wide">
+                  <tr>
+                    <th className="px-2 py-2 text-left w-10">SS</th>
+                    <th className="px-2 py-2 text-left">Exercise</th>
+                    <th className="px-2 py-2 text-left w-16">Sets</th>
+                    <th className="px-2 py-2 text-left w-20">Reps</th>
+                    <th className="px-2 py-2 text-left">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayedExercises.map((row) => (
+                    <tr key={row.id} className="border-b">
+                      <td className="px-2 py-2 font-bold text-xs uppercase">{row.superset_group ?? "—"}</td>
+                      <td className="px-2 py-2 font-medium">{row.exercise_name}</td>
+                      <td className="px-2 py-2">{row.sets ?? "—"}</td>
+                      <td className="px-2 py-2">{row.reps ?? "—"}</td>
+                      <td className="px-2 py-2 text-blue-600">{row.notes ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {displayedExercises.length === 0 && (
+                <div className="text-center py-12 text-muted-foreground text-sm">
+                  No exercises assigned to this athlete for this workout.
+                </div>
+              )}
+            </div>
+          ) : (
+          <>
+          <DndContext id="workout-builder" sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <div className="rounded-lg border overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-xs text-muted-foreground uppercase tracking-wide">
@@ -537,6 +630,8 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
           </div>
 
           <ExcelImport onImport={handleImportExcel} />
+          </>
+          )}
         </>
       )}
 

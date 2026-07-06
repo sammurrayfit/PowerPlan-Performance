@@ -196,6 +196,7 @@ export type Database = {
           notes: string | null;
           is_pr_tracking: boolean;
           superset_group: string | null;
+          is_pre_activation: boolean;
           created_at: string;
         };
         Insert: {
@@ -212,6 +213,7 @@ export type Database = {
           notes?: string | null;
           is_pr_tracking?: boolean;
           superset_group?: string | null;
+          is_pre_activation?: boolean;
           created_at?: string;
         };
         Update: {
@@ -228,6 +230,7 @@ export type Database = {
           notes?: string | null;
           is_pr_tracking?: boolean;
           superset_group?: string | null;
+          is_pre_activation?: boolean;
           created_at?: string;
         };
       } & NoRelationships;

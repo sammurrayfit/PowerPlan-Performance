@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CalendarDays, Users, Dumbbell, TrendingUp, Trophy, CheckCircle2, Circle } from "lucide-react";
+import { compareWorkoutOrder } from "@/lib/utils";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -79,13 +80,14 @@ export default async function CoachDashboard() {
   }
 
   // ── This week's workouts ────────────────────────────────────────────────────
-  const { data: weekWorkouts } = await supabase
+  const { data: weekWorkoutsRaw } = await supabase
     .from("workouts")
     .select("id, title, date, calendar_id")
     .in("calendar_id", calIds)
     .gte("date", weekStart)
     .lte("date", weekEnd)
     .order("date");
+  const weekWorkouts = (weekWorkoutsRaw ?? []).sort(compareWorkoutOrder);
 
   const weekWorkoutIds = (weekWorkouts ?? []).map((w) => w.id);
 

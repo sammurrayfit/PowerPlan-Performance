@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
+import { compareWorkoutOrder } from "@/lib/utils";
 
 interface Props {
   searchParams: Promise<{ month?: string }>;
@@ -64,7 +65,7 @@ export default async function AthleteCalendarPage({ searchParams }: Props) {
         .gte("date", firstDay)
         .lte("date", lastDay)
         .order("date");
-      workouts = data ?? [];
+      workouts = (data ?? []).sort(compareWorkoutOrder);
     }
   }
 
@@ -136,7 +137,7 @@ export default async function AthleteCalendarPage({ searchParams }: Props) {
 
             const dateStr = `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
             const isToday = dateStr === todayStr;
-            const dayWorkouts = workoutsByDate[dateStr] ?? [];
+            const dayWorkouts = (workoutsByDate[dateStr] ?? []).filter((w) => w.title !== "Pre-Activation");
 
             return (
               <div

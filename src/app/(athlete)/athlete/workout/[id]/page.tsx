@@ -24,6 +24,93 @@ export default async function AthleteWorkoutPage({ params }: Props) {
 
   if (!workout) notFound();
 
+  // Fetch pre-activation workout from athlete's personal calendar for this date
+  const { data: personalCalendars } = await supabase
+    .from("calendars")
+    .select("id")
+    .eq("athlete_id", user.id)
+    .eq("name", "Pre-Activation");
+
+  const personalCalIds = (personalCalendars ?? []).map((c) => c.id);
+
+  const preActivationExerciseList: {
+    id: string; exercise_id: string; exercise_name: string;
+    video_url: string | null; image_url: string | null;
+    sort_order: number; sets: number | null; reps: string | null;
+    load: number | null; load_type: string | null; tempo: string | null;
+    rest_seconds: number | null; notes: string | null; superset_group: string | null;
+    is_pre_activation: boolean; override: null; max: null; logs: object[]; previousSession: null;
+  }[] = [];
+
+  if (personalCalIds.length > 0) {
+    const { data: preActWorkout } = await supabase
+      .from("workouts")
+      .select("id")
+      .in("calendar_id", personalCalIds)
+      .eq("date", workout.date)
+      .eq("title", "Pre-Activation")
+      .maybeSingle();
+
+    if (preActWorkout) {
+      const [{ data: preActExercises }, { data: preActLogs }] = await Promise.all([
+        supabase
+          .from("workout_exercises")
+          .select("*, exercises(id, name, video_url, image_url)")
+          .eq("workout_id", preActWorkout.id)
+          .order("sort_order"),
+        supabase
+          .from("exercise_logs")
+          .select("*")
+          .eq("workout_id", preActWorkout.id)
+          .eq("athlete_id", user.id),
+      ]);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const preActLogsMap: Record<string, any[]> = {};
+      for (const l of preActLogs ?? []) {
+        if (!preActLogsMap[l.workout_exercise_id]) preActLogsMap[l.workout_exercise_id] = [];
+        preActLogsMap[l.workout_exercise_id].push(l);
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const e of preActExercises ?? [] as any[]) {
+        preActivationExerciseList.push({
+          id: e.id,
+          exercise_id: e.exercise_id,
+          exercise_name: (e.exercises as { name: string } | null)?.name ?? "Unknown",
+          video_url: (e.exercises as { video_url: string | null } | null)?.video_url ?? null,
+          image_url: (e.exercises as { image_url: string | null } | null)?.image_url ?? null,
+          sort_order: e.sort_order,
+          sets: e.sets,
+          reps: e.reps,
+          load: e.load,
+          load_type: e.load_type,
+          tempo: e.tempo,
+          rest_seconds: e.rest_seconds,
+          notes: e.notes,
+          superset_group: e.superset_group ?? null,
+          is_pre_activation: true,
+          override: null,
+          max: null,
+          logs: preActLogsMap[e.id] ?? [],
+          previousSession: null,
+        });
+      }
+    }
+  }
+
+  // Fetch sibling workouts for prev/next navigation
+  const { data: siblingWorkouts } = await supabase
+    .from("workouts")
+    .select("id, date")
+    .eq("calendar_id", workout.calendar_id)
+    .order("date");
+
+  const workoutList = siblingWorkouts ?? [];
+  const currentIdx = workoutList.findIndex((w) => w.id === id);
+  const prevWorkoutId = currentIdx > 0 ? workoutList[currentIdx - 1].id : null;
+  const nextWorkoutId = currentIdx < workoutList.length - 1 ? workoutList[currentIdx + 1].id : null;
+
   // Check attendance (for RPE gate + post-RPE)
   const { data: attendance, error: attendanceError } = await supabase
     .from("attendance")
@@ -32,15 +119,8 @@ export default async function AthleteWorkoutPage({ params }: Props) {
     .eq("athlete_id", user.id)
     .maybeSingle();
 
-  // On DB error, fail safe: block access rather than silently bypassing the gate
-  if (attendanceError) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-2 text-center">
-        <p className="font-medium">Unable to load workout</p>
-        <p className="text-sm text-muted-foreground">Please refresh the page and try again.</p>
-      </div>
-    );
-  }
+  // Treat attendance query errors (e.g. RLS on team calendars) as "no attendance yet" —
+  // the RPE gate handles the locked-but-no-attendance case below.
 
   const needsRPEGate = workout.is_locked && (attendance == null || attendance.rpe_pre == null);
 
@@ -133,7 +213,15 @@ export default async function AthleteWorkoutPage({ params }: Props) {
     prevSessionByExId[exId].sets.push({ set_number: l.set_number, reps: l.reps_completed ?? null, load: l.load_completed ?? null, rpe: l.rpe ?? null });
   }
 
-  const exerciseList = exercises.map((e: any) => ({
+  // If the athlete has personalized overrides for this workout, show only those exercises.
+  // This handles programs where different athletes have different exercise lists
+  // (not just different loads). Athletes with no overrides see the full base.
+  const hasOverrides = Object.keys(overridesMap).length > 0;
+  const visibleExercises = hasOverrides
+    ? exercises.filter((e: any) => overridesMap[e.id])
+    : exercises;
+
+  const exerciseList = visibleExercises.map((e: any) => ({
     id: e.id,
     exercise_id: e.exercise_id,
     exercise_name: (e.exercises as { name: string } | null)?.name ?? "Unknown",
@@ -148,16 +236,20 @@ export default async function AthleteWorkoutPage({ params }: Props) {
     rest_seconds: e.rest_seconds,
     notes: e.notes,
     superset_group: e.superset_group ?? null,
+    is_pre_activation: e.is_pre_activation ?? false,
     override: overridesMap[e.id] ?? null,
     max: e.exercise_id ? (maxesMap[e.exercise_id] ?? null) : null,
     logs: logsMap[e.id] ?? [],
     previousSession: e.exercise_id ? (prevSessionByExId[e.exercise_id] ?? null) : null,
   }));
 
+  // Pre-activation prepended; main exercises follow
+  const combinedExercises = [...preActivationExerciseList, ...exerciseList];
+
   return (
     <WorkoutLogger
-      workout={workout}
-      exercises={exerciseList}
+      workout={{ ...workout, prevWorkoutId, nextWorkoutId }}
+      exercises={combinedExercises}
       athleteId={user.id}
       attendanceId={attendance?.id ?? null}
     />

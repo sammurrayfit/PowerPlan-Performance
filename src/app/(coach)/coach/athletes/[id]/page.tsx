@@ -1,13 +1,14 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { MaxesTable } from "@/components/coach/athletes/maxes-table";
 import { AthleteSettings } from "@/components/coach/athletes/athlete-settings";
 import { AthleteCalendar } from "@/components/coach/athletes/athlete-calendar";
+import { BackButton } from "@/components/ui/back-button";
+import { compareWorkoutOrder } from "@/lib/utils";
 
 interface Props {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ view?: string; date?: string; month?: string }>;
+  searchParams: Promise<{ view?: string; date?: string; month?: string; back?: string }>;
 }
 
 function toDateStr(date: Date) {
@@ -17,6 +18,7 @@ function toDateStr(date: Date) {
 export default async function AthleteProfilePage({ params, searchParams }: Props) {
   const { id } = await params;
   const sp = await searchParams;
+  const backUrl = sp.back ?? null;
   const supabase = await createClient();
   const { data: { user: coach } } = await supabase.auth.getUser();
 
@@ -88,11 +90,13 @@ export default async function AthleteProfilePage({ params, searchParams }: Props
       .lte("date", lastDay)
       .order("date");
 
-    scheduleWorkouts = (wkts ?? []).map((w) => ({
-      ...w,
-      calendarName:  calMap[w.calendar_id]?.name  ?? "",
-      calendarColor: calMap[w.calendar_id]?.color ?? "#32127A",
-    }));
+    scheduleWorkouts = (wkts ?? [])
+      .map((w) => ({
+        ...w,
+        calendarName:  calMap[w.calendar_id]?.name  ?? "",
+        calendarColor: calMap[w.calendar_id]?.color ?? "#32127A",
+      }))
+      .sort(compareWorkoutOrder);
   }
 
   // ── Maxes ─────────────────────────────────────────────────────────────────
@@ -124,9 +128,7 @@ export default async function AthleteProfilePage({ params, searchParams }: Props
     <div className="space-y-8">
       {/* Header */}
       <div>
-        <Link href="/coach/athletes" className="text-sm text-muted-foreground hover:text-foreground">
-          ← Athletes
-        </Link>
+        <BackButton label={backUrl ? "Calendar" : "Athletes"} href={backUrl ?? null} fallback="/coach/athletes" />
         <div className="mt-3 flex items-start justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="h-14 w-14 rounded-full bg-primary/10 text-primary flex items-center justify-center text-2xl font-bold shrink-0">

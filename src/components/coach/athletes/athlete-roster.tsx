@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { UserPlus, UserMinus, ChevronRight, Plus } from "lucide-react";
-import { inviteAthlete, createAthleteDirectly, removeAthleteFromTeam, createTeam } from "@/app/(coach)/coach/athletes/actions";
+import { UserPlus, UserMinus, ChevronRight, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { inviteAthlete, createAthleteDirectly, removeAthleteFromTeam, createTeam, deleteTeam } from "@/app/(coach)/coach/athletes/actions";
 
 interface Athlete {
   id: string;
@@ -211,9 +211,24 @@ function CreateTeamDialog({ onCreated }: { onCreated: () => void }) {
 }
 
 export function AthleteRoster({ teams }: AthleteRosterProps) {
+  const router = useRouter();
+  const [openTeams, setOpenTeams] = useState<Record<string, boolean>>(
+    () => Object.fromEntries(teams.map((t) => [t.id, true]))
+  );
+
+  function toggleTeam(teamId: string) {
+    setOpenTeams((prev) => ({ ...prev, [teamId]: !prev[teamId] }));
+  }
+
   async function handleRemove(athleteId: string, teamId: string, name: string) {
     if (!confirm(`Remove ${name} from this team?`)) return;
     await removeAthleteFromTeam(athleteId, teamId);
+  }
+
+  async function handleDeleteTeam(teamId: string, name: string) {
+    if (!confirm(`Delete team "${name}"? Athlete accounts won't be deleted, just removed from this team.`)) return;
+    await deleteTeam(teamId);
+    router.refresh();
   }
 
   return (
@@ -235,46 +250,73 @@ export function AthleteRoster({ teams }: AthleteRosterProps) {
           <p className="text-sm mt-1">Create a team above, then add athletes to it.</p>
         </div>
       ) : (
-        <div className="space-y-8">
-          {teams.map((team) => (
-            <div key={team.id} className="space-y-3">
-              <h2 className="text-lg font-semibold">{team.name}</h2>
-
-              {team.athletes.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-4">No athletes yet — use Add Athlete above.</p>
-              ) : (
-                <div className="rounded-lg border divide-y">
-                  {team.athletes.map((athlete) => (
-                    <div key={athlete.id} className="flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors">
-                      <Link href={`/coach/athletes/${athlete.id}`} className="flex items-center gap-3 flex-1 min-w-0">
-                        <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-semibold shrink-0">
-                          {athlete.full_name.charAt(0).toUpperCase()}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="font-medium text-sm truncate">{athlete.full_name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Joined {new Date(athlete.joined_at).toLocaleDateString()}
-                          </p>
-                        </div>
-                      </Link>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Link href={`/coach/athletes/${athlete.id}`}>
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                        </Link>
-                        <button
-                          onClick={() => handleRemove(athlete.id, team.id, athlete.full_name)}
-                          className="text-muted-foreground hover:text-destructive transition-colors ml-1"
-                          title="Remove from team"
-                        >
-                          <UserMinus className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+        <div className="space-y-4">
+          {teams.map((team) => {
+            const isOpen = openTeams[team.id] ?? true;
+            return (
+              <div key={team.id} className="border rounded-lg overflow-hidden">
+                {/* Team header */}
+                <div className="flex items-center px-4 py-3 bg-muted/30">
+                  <button
+                    onClick={() => toggleTeam(team.id)}
+                    className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                  >
+                    <ChevronDown
+                      className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ${isOpen ? "" : "-rotate-90"}`}
+                    />
+                    <span className="font-semibold text-sm">{team.name}</span>
+                    <span className="text-xs text-muted-foreground font-normal">
+                      {team.athletes.length} athlete{team.athletes.length !== 1 ? "s" : ""}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => handleDeleteTeam(team.id, team.name)}
+                    className="text-muted-foreground hover:text-destructive transition-colors ml-2 shrink-0"
+                    title="Delete team"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 </div>
-              )}
-            </div>
-          ))}
+
+                {/* Collapsible athlete list */}
+                {isOpen && (
+                  team.athletes.length === 0 ? (
+                    <p className="text-sm text-muted-foreground px-4 py-4">No athletes yet — use Add Athlete above.</p>
+                  ) : (
+                    <div className="divide-y">
+                      {team.athletes.map((athlete) => (
+                        <div key={athlete.id} className="flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors">
+                          <Link href={`/coach/athletes/${athlete.id}`} className="flex items-center gap-3 flex-1 min-w-0">
+                            <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-semibold shrink-0">
+                              {athlete.full_name.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-medium text-sm truncate">{athlete.full_name}</p>
+                              <p className="text-xs text-muted-foreground">
+                                Joined {new Date(athlete.joined_at).toLocaleDateString()}
+                              </p>
+                            </div>
+                          </Link>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Link href={`/coach/athletes/${athlete.id}`}>
+                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            </Link>
+                            <button
+                              onClick={() => handleRemove(athlete.id, team.id, athlete.full_name)}
+                              className="text-muted-foreground hover:text-destructive transition-colors ml-1"
+                              title="Remove from team"
+                            >
+                              <UserMinus className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

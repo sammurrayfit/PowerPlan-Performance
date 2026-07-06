@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -135,7 +135,8 @@ function CalendarPickerDialog({
 
   function go(path: string) {
     onOpenChange(false);
-    router.push(path);
+    const back = encodeURIComponent(`/coach/calendar?open=${calendar.id}`);
+    router.push(`${path}?back=${back}`);
   }
 
   return (
@@ -194,6 +195,7 @@ function CalendarPickerDialog({
 
 export function CalendarList({ calendars: initialCalendars, teams, coachId, athletesByTeam }: CalendarListProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = createClient();
   const [calendarList, setCalendarList] = useState<Calendar[]>(initialCalendars);
   const [open, setOpen] = useState(false);
@@ -203,6 +205,15 @@ export function CalendarList({ calendars: initialCalendars, teams, coachId, athl
   const [name, setName] = useState("");
   const [teamId, setTeamId] = useState("");
   const [pickerCalendar, setPickerCalendar] = useState<Calendar | null>(null);
+
+  // Auto-open picker when returning from an athlete page
+  useEffect(() => {
+    const openId = searchParams.get("open");
+    if (openId) {
+      const cal = initialCalendars.find((c) => c.id === openId);
+      if (cal) setPickerCalendar(cal);
+    }
+  }, []);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();

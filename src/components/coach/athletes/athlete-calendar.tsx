@@ -79,10 +79,10 @@ function ViewToggle({ athleteId, view, focusDate }: { athleteId: string; view: s
 
 // ─── Workout pill ─────────────────────────────────────────────────────────────
 
-function WorkoutPill({ workout }: { workout: CalendarWorkout }) {
+function WorkoutPill({ workout, athleteId, backUrl }: { workout: CalendarWorkout; athleteId: string; backUrl: string }) {
   return (
     <Link
-      href={`/coach/calendar/${workout.calendar_id}/workout/${workout.id}`}
+      href={`/coach/calendar/${workout.calendar_id}/workout/${workout.id}?athlete=${athleteId}&back=${encodeURIComponent(backUrl)}`}
       onClick={(e) => e.stopPropagation()}
       className="block w-full text-left text-xs px-1.5 py-0.5 rounded truncate text-white hover:opacity-80 transition-opacity"
       style={{ backgroundColor: workout.calendarColor }}
@@ -169,7 +169,7 @@ function MonthView({ athleteId, workouts, view, focusDate }: AthleteCalendarProp
                     </span>
                     <div className="mt-1 space-y-0.5">
                       {dayWorkouts.map((w) => (
-                        <WorkoutPill key={w.id} workout={w} />
+                        <WorkoutPill key={w.id} workout={w} athleteId={athleteId} backUrl={buildUrl(athleteId, view, focusDate)} />
                       ))}
                     </div>
                   </>
@@ -263,7 +263,7 @@ function WeekView({ athleteId, workouts, view, focusDate }: AthleteCalendarProps
                 }`}
               >
                 {dayWorkouts.map((w) => (
-                  <WorkoutPill key={w.id} workout={w} />
+                  <WorkoutPill key={w.id} workout={w} athleteId={athleteId} backUrl={buildUrl(athleteId, view, focusDate)} />
                 ))}
               </Link>
             );
@@ -325,7 +325,7 @@ function DayView({ athleteId, workouts, view, focusDate }: AthleteCalendarProps)
           {dayWorkouts.map((w) => (
             <Link
               key={w.id}
-              href={`/coach/calendar/${w.calendar_id}/workout/${w.id}`}
+              href={`/coach/calendar/${w.calendar_id}/workout/${w.id}?athlete=${athleteId}&back=${encodeURIComponent(buildUrl(athleteId, view, focusDate))}`}
               className="flex items-center gap-4 rounded-lg border bg-card px-4 py-3 hover:border-foreground/20 hover:bg-muted/30 transition-colors"
             >
               <div

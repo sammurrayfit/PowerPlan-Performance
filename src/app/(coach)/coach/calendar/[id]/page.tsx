@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { MonthView } from "@/components/coach/calendar/month-view";
 import { ProgramImport } from "@/components/coach/calendar/program-import";
+import { compareWorkoutOrder } from "@/lib/utils";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -44,6 +45,7 @@ export default async function CalendarPage({ params, searchParams }: Props) {
     .gte("date", firstDay)
     .lte("date", lastDayStr)
     .order("date");
+  const sortedWorkouts = (workouts ?? []).sort(compareWorkoutOrder);
 
   // Fetch athletes for program import override matching
   let athletes: { id: string; full_name: string }[] = [];
@@ -66,7 +68,7 @@ export default async function CalendarPage({ params, searchParams }: Props) {
     <div className="space-y-6">
       <MonthView
         calendar={calendar}
-        workouts={workouts ?? []}
+        workouts={sortedWorkouts}
         year={year}
         month={monthIndex}
       />
