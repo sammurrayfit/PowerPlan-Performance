@@ -1,13 +1,15 @@
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveCoachId } from "@/lib/supabase/coach";
 import { CalendarList } from "@/components/coach/calendar/calendar-list";
 
 export default async function CalendarsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user!.id);
 
   const [{ data: calendars }, { data: teams }] = await Promise.all([
-    supabase.from("calendars").select("*").eq("coach_id", user!.id).is("athlete_id", null).order("created_at"),
-    supabase.from("teams").select("id, name").eq("coach_id", user!.id).order("name"),
+    supabase.from("calendars").select("*").eq("coach_id", effectiveCoachId).is("athlete_id", null).order("created_at"),
+    supabase.from("teams").select("id, name").eq("coach_id", effectiveCoachId).order("name"),
   ]);
 
   // Fetch athletes for any team-linked calendars
@@ -54,7 +56,7 @@ export default async function CalendarsPage() {
     <CalendarList
       calendars={calendars ?? []}
       teams={teams ?? []}
-      coachId={user!.id}
+      coachId={effectiveCoachId}
       athletesByTeam={athletesByTeam}
     />
   );

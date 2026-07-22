@@ -1,16 +1,18 @@
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveCoachId } from "@/lib/supabase/coach";
 import { CoachWellnessView } from "@/components/coach/coaching-tools/wellness-view";
 
 export default async function CoachWellnessPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
   // Get all athletes under this coach
   const { data: calendars } = await supabase
     .from("calendars")
     .select("team_id, athlete_id")
-    .eq("coach_id", user.id);
+    .eq("coach_id", effectiveCoachId);
 
   const teamIds = (calendars ?? []).map((c) => c.team_id).filter(Boolean) as string[];
   const directIds = (calendars ?? []).map((c) => c.athlete_id).filter(Boolean) as string[];

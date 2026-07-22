@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveCoachId } from "@/lib/supabase/coach";
 
 export async function createCalendar(formData: FormData) {
   const supabase = await createClient();
@@ -12,11 +13,12 @@ export async function createCalendar(formData: FormData) {
   const name = formData.get("name") as string;
   const color = formData.get("color") as string;
   const teamId = formData.get("team_id") as string | null;
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
   await supabase.from("calendars").insert({
     name,
     color: color || "#32127A",
-    coach_id: user.id,
+    coach_id: effectiveCoachId,
     team_id: teamId || null,
   });
 
@@ -27,7 +29,8 @@ export async function deleteCalendar(id: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
-  await supabase.from("calendars").delete().eq("id", id).eq("coach_id", user.id);
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
+  await supabase.from("calendars").delete().eq("id", id).eq("coach_id", effectiveCoachId);
   revalidatePath("/coach/calendar");
 }
 
@@ -56,7 +59,8 @@ export async function updateWorkout(id: string, updates: { title?: string; notes
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
-  const { data: calendars } = await supabase.from("calendars").select("id").eq("coach_id", user.id);
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
+  const { data: calendars } = await supabase.from("calendars").select("id").eq("coach_id", effectiveCoachId);
   const calIds = (calendars ?? []).map((c) => c.id);
   if (calIds.length === 0) throw new Error("Not authorized");
   await supabase.from("workouts").update(updates).eq("id", id).in("calendar_id", calIds);
@@ -66,8 +70,9 @@ export async function deleteWorkout(id: string, calendarId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
   const { data: cal } = await supabase.from("calendars").select("coach_id").eq("id", calendarId).single();
-  if (!cal || cal.coach_id !== user.id) throw new Error("Not authorized");
+  if (!cal || cal.coach_id !== effectiveCoachId) throw new Error("Not authorized");
   await supabase.from("workouts").delete().eq("id", id).eq("calendar_id", calendarId);
   redirect(`/coach/calendar/${calendarId}`);
 }
@@ -152,7 +157,8 @@ export async function upsertOverride(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
-  await assertCoachOwnsWorkoutExercise(supabase, workoutExerciseId, user.id);
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
+  await assertCoachOwnsWorkoutExercise(supabase, workoutExerciseId, effectiveCoachId);
   await supabase.from("athlete_exercise_overrides").upsert(
     { workout_exercise_id: workoutExerciseId, athlete_id: athleteId, ...data },
     { onConflict: "workout_exercise_id,athlete_id" }
@@ -163,7 +169,8 @@ export async function deleteOverride(workoutExerciseId: string, athleteId: strin
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
-  await assertCoachOwnsWorkoutExercise(supabase, workoutExerciseId, user.id);
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
+  await assertCoachOwnsWorkoutExercise(supabase, workoutExerciseId, effectiveCoachId);
   await supabase
     .from("athlete_exercise_overrides")
     .delete()

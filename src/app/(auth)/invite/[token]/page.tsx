@@ -16,12 +16,18 @@ export default function InvitePage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
+  const [role, setRole] = useState<"coach" | "athlete">("athlete");
 
   useEffect(() => {
     // Supabase magic link drops access_token in the URL hash — exchange it
     const supabase = createClient();
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) setSessionReady(true);
+      if (data.session) {
+        // Preserve the role set at invite time (inviteAthlete/inviteCoach) —
+        // don't overwrite it when we save full_name below.
+        if (data.session.user.user_metadata?.role === "coach") setRole("coach");
+        setSessionReady(true);
+      }
     });
   }, []);
 
@@ -32,7 +38,7 @@ export default function InvitePage() {
 
     const { error: updateError } = await supabase.auth.updateUser({
       password,
-      data: { full_name: fullName, role: "athlete" },
+      data: { full_name: fullName, role },
     });
 
     if (updateError) {
@@ -42,7 +48,7 @@ export default function InvitePage() {
     }
 
     toast.success("Account set up! Welcome to PowerPlan Performance.");
-    router.push("/athlete/dashboard");
+    router.push(role === "coach" ? "/coach/dashboard" : "/athlete/dashboard");
   }
 
   if (!sessionReady) {

@@ -1,10 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveCoachId } from "@/lib/supabase/coach";
 import { RPEMonitor } from "@/components/coach/coaching-tools/rpe-monitor";
 
 export default async function RPEPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
   const today = new Date().toISOString().split("T")[0];
 
@@ -12,7 +14,7 @@ export default async function RPEPage() {
   const { data: calendars } = await supabase
     .from("calendars")
     .select("id, team_id, athlete_id")
-    .eq("coach_id", user.id);
+    .eq("coach_id", effectiveCoachId);
 
   const calendarIds = (calendars ?? []).map((c) => c.id);
 

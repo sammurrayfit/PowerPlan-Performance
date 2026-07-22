@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveCoachId, getCoachGroupIds } from "@/lib/supabase/coach";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CalendarDays, Users, Dumbbell, TrendingUp, Trophy, CheckCircle2, Circle } from "lucide-react";
@@ -34,6 +35,8 @@ export default async function CoachDashboard() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return null;
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
+  const coachGroupIds = await getCoachGroupIds(supabase, effectiveCoachId);
 
   const { start: weekStart, end: weekEnd } = isoWeekBounds();
   const today = new Date().toISOString().split("T")[0];
@@ -46,10 +49,10 @@ export default async function CoachDashboard() {
     { data: calendars },
     { data: teams },
   ] = await Promise.all([
-    supabase.from("calendars").select("*", { count: "exact", head: true }).eq("coach_id", user.id),
-    supabase.from("exercises").select("*", { count: "exact", head: true }).eq("created_by", user.id),
-    supabase.from("calendars").select("id, name, team_id, athlete_id").eq("coach_id", user.id),
-    supabase.from("teams").select("id").eq("coach_id", user.id),
+    supabase.from("calendars").select("*", { count: "exact", head: true }).eq("coach_id", effectiveCoachId),
+    supabase.from("exercises").select("*", { count: "exact", head: true }).in("created_by", coachGroupIds),
+    supabase.from("calendars").select("id, name, team_id, athlete_id").eq("coach_id", effectiveCoachId),
+    supabase.from("teams").select("id").eq("coach_id", effectiveCoachId),
   ]);
 
   const calIds = (calendars ?? []).map((c) => c.id);

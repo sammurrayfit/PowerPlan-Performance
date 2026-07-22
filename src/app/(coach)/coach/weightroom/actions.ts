@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveCoachId } from "@/lib/supabase/coach";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 
 function adminClient() {
@@ -25,6 +26,7 @@ export async function saveKioskSet(params: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
   // Verify this coach owns the workout
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -34,7 +36,7 @@ export async function saveKioskSet(params: {
     .eq("id", params.workoutId)
     .single();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if ((wo as any)?.calendars?.coach_id !== user.id) throw new Error("Not authorized");
+  if ((wo as any)?.calendars?.coach_id !== effectiveCoachId) throw new Error("Not authorized");
 
   const admin = adminClient();
   if (params.existingLogId) {
@@ -88,6 +90,7 @@ export async function saveKioskAttendance(params: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
   // Verify coach owns the workout
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -97,7 +100,7 @@ export async function saveKioskAttendance(params: {
     .eq("id", params.workoutId)
     .single();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if ((wo as any)?.calendars?.coach_id !== user.id) throw new Error("Not authorized");
+  if ((wo as any)?.calendars?.coach_id !== effectiveCoachId) throw new Error("Not authorized");
 
   const admin = adminClient();
   const { error } = await admin

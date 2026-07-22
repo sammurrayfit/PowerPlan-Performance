@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveCoachId } from "@/lib/supabase/coach";
 import { MonthView } from "@/components/coach/calendar/month-view";
 import { ProgramImport } from "@/components/coach/calendar/program-import";
 import { compareWorkoutOrder } from "@/lib/utils";
@@ -14,6 +15,8 @@ export default async function CalendarPage({ params, searchParams }: Props) {
   const { month } = await searchParams;
 
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const effectiveCoachId = user ? await getEffectiveCoachId(supabase, user.id) : null;
 
   const { data: calendar } = await supabase
     .from("calendars")
@@ -72,7 +75,7 @@ export default async function CalendarPage({ params, searchParams }: Props) {
         year={year}
         month={monthIndex}
       />
-      <ProgramImport calendarId={id} athletes={athletes} />
+      <ProgramImport calendarId={id} athletes={athletes} effectiveCoachId={effectiveCoachId!} />
     </div>
   );
 }

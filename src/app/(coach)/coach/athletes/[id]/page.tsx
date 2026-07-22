@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveCoachId } from "@/lib/supabase/coach";
 import { MaxesTable } from "@/components/coach/athletes/maxes-table";
 import { AthleteSettings } from "@/components/coach/athletes/athlete-settings";
 import { AthleteCalendar } from "@/components/coach/athletes/athlete-calendar";
@@ -21,6 +22,7 @@ export default async function AthleteProfilePage({ params, searchParams }: Props
   const backUrl = sp.back ?? null;
   const supabase = await createClient();
   const { data: { user: coach } } = await supabase.auth.getUser();
+  const effectiveCoachId = coach ? await getEffectiveCoachId(supabase, coach.id) : null;
 
   // ── View + focus date ──────────────────────────────────────────────────────
   const view =
@@ -53,8 +55,8 @@ export default async function AthleteProfilePage({ params, searchParams }: Props
     supabase.from("personal_records").select("id, exercise_id, value, unit, date_achieved, exercises(id, name)").eq("athlete_id", id).order("date_achieved", { ascending: false }),
     supabase.from("exercises").select("id, name").order("name"),
     supabase.from("team_memberships").select("team_id").eq("athlete_id", id),
-    coach
-      ? supabase.from("calendars").select("id, name, team_id, athlete_id, color").eq("coach_id", coach.id).order("name")
+    effectiveCoachId
+      ? supabase.from("calendars").select("id, name, team_id, athlete_id, color").eq("coach_id", effectiveCoachId).order("name")
       : Promise.resolve({ data: [] }),
   ]);
 

@@ -17,6 +17,7 @@ export type Database = {
           role: "coach" | "athlete";
           full_name: string;
           avatar_url: string | null;
+          primary_coach_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -24,6 +25,7 @@ export type Database = {
           role: "coach" | "athlete";
           full_name: string;
           avatar_url?: string | null;
+          primary_coach_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -31,6 +33,7 @@ export type Database = {
           role?: "coach" | "athlete";
           full_name?: string;
           avatar_url?: string | null;
+          primary_coach_id?: string | null;
           created_at?: string;
         };
       } & NoRelationships;

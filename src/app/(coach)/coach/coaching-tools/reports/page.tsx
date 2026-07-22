@@ -1,16 +1,18 @@
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveCoachId } from "@/lib/supabase/coach";
 import { ReportsShell } from "@/components/coach/coaching-tools/reports/reports-shell";
 
 export default async function ReportsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
   // Fetch all athletes under this coach
   const { data: calendars } = await supabase
     .from("calendars")
     .select("team_id, athlete_id")
-    .eq("coach_id", user.id);
+    .eq("coach_id", effectiveCoachId);
 
   const teamIds = (calendars ?? []).map((c) => c.team_id).filter(Boolean) as string[];
   const directIds = (calendars ?? []).map((c) => c.athlete_id).filter(Boolean) as string[];
@@ -56,7 +58,7 @@ export default async function ReportsPage() {
 
   return (
     <ReportsShell
-      coachId={user.id}
+      coachId={effectiveCoachId}
       athletes={(athletes ?? []) as { id: string; full_name: string }[]}
       exercises={exercises}
     />

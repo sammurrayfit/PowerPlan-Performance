@@ -223,6 +223,7 @@ export function AthleteRoster({ teams }: AthleteRosterProps) {
   async function handleRemove(athleteId: string, teamId: string, name: string) {
     if (!confirm(`Remove ${name} from this team?`)) return;
     await removeAthleteFromTeam(athleteId, teamId);
+    router.refresh();
   }
 
   async function handleDeleteTeam(teamId: string, name: string) {

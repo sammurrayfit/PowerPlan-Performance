@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveCoachId, getCoachGroupIds } from "@/lib/supabase/coach";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { ExerciseForm } from "@/components/coach/exercises/exercise-form";
@@ -9,6 +10,8 @@ export default async function ExerciseDetailPage({ params }: { params: Promise<{
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
+  const coachGroupIds = await getCoachGroupIds(supabase, effectiveCoachId);
 
   const [{ data: exercise }, { data: categories }] = await Promise.all([
     supabase.from("exercises").select("*").eq("id", id).single(),
@@ -55,7 +58,7 @@ export default async function ExerciseDetailPage({ params }: { params: Promise<{
         </div>
       )}
 
-      {exercise.created_by === user.id && (
+      {exercise.created_by && coachGroupIds.includes(exercise.created_by) && (
         <div className="border-t pt-6">
           <h2 className="font-semibold mb-4">Edit exercise</h2>
           <ExerciseForm

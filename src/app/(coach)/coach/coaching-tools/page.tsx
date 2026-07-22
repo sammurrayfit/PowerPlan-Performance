@@ -1,17 +1,19 @@
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveCoachId } from "@/lib/supabase/coach";
 import { WeightroomKiosk } from "@/components/coach/weightroom/weightroom-kiosk";
 
 export default async function CoachingToolsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
   const today = new Date().toISOString().split("T")[0];
 
   const { data: calendars } = await supabase
     .from("calendars")
     .select("id, name, team_id, athlete_id")
-    .eq("coach_id", user.id);
+    .eq("coach_id", effectiveCoachId);
 
   const calendarIds = (calendars ?? []).map((c) => c.id);
   const { data: workouts } = calendarIds.length > 0

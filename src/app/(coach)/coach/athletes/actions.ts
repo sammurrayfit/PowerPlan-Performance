@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveCoachId } from "@/lib/supabase/coach";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { autoRecordPR, type Unit } from "@/lib/pr";
 
@@ -77,13 +78,14 @@ export async function removeAthleteFromTeam(athleteId: string, teamId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
   const { data: team } = await supabase
     .from("teams")
     .select("coach_id")
     .eq("id", teamId)
     .single();
-  if (!team || team.coach_id !== user.id) throw new Error("Not authorized");
+  if (!team || team.coach_id !== effectiveCoachId) throw new Error("Not authorized");
 
   await supabase
     .from("team_memberships")
@@ -112,12 +114,13 @@ export async function deleteMax(maxId: string, athleteId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
-  const { data: teams } = await supabase.from("teams").select("id").eq("coach_id", user.id);
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
+  const { data: teams } = await supabase.from("teams").select("id").eq("coach_id", effectiveCoachId);
   const teamIds = (teams ?? []).map((t) => t.id);
   const { data: membership } = teamIds.length > 0
     ? await supabase.from("team_memberships").select("athlete_id").eq("athlete_id", athleteId).in("team_id", teamIds).maybeSingle()
     : { data: null };
-  const { data: directCal } = await supabase.from("calendars").select("id").eq("coach_id", user.id).eq("athlete_id", athleteId).maybeSingle();
+  const { data: directCal } = await supabase.from("calendars").select("id").eq("coach_id", effectiveCoachId).eq("athlete_id", athleteId).maybeSingle();
   if (!membership && !directCal) throw new Error("Not authorized");
   await supabase.from("maxes").delete().eq("id", maxId).eq("athlete_id", athleteId);
   revalidatePath(`/coach/athletes/${athleteId}`);
@@ -127,13 +130,14 @@ export async function deleteTeam(teamId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
   const { data: team } = await supabase
     .from("teams")
     .select("coach_id")
     .eq("id", teamId)
     .single();
-  if (!team || team.coach_id !== user.id) throw new Error("Not authorized");
+  if (!team || team.coach_id !== effectiveCoachId) throw new Error("Not authorized");
 
   await supabase.from("team_memberships").delete().eq("team_id", teamId);
   const { error } = await supabase.from("teams").delete().eq("id", teamId);
@@ -146,9 +150,10 @@ export async function createTeam(name: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
   const { data, error } = await supabase
     .from("teams")
-    .insert({ name, coach_id: user.id })
+    .insert({ name, coach_id: effectiveCoachId })
     .select("id, name")
     .single();
   if (error || !data) throw new Error(error?.message ?? "Failed to create team");
@@ -197,12 +202,13 @@ export async function bulkImportMaxes(rows: BulkMaxRow[]): Promise<BulkImportRes
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
   // Load all athletes under this coach
   const { data: teams } = await supabase
     .from("teams")
     .select("id")
-    .eq("coach_id", user.id);
+    .eq("coach_id", effectiveCoachId);
   const teamIds = (teams ?? []).map((t) => t.id);
 
   const { data: memberships } = teamIds.length > 0

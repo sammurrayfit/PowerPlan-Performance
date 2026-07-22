@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveCoachId } from "@/lib/supabase/coach";
 import { redirect } from "next/navigation";
 import { AthleteRoster } from "@/components/coach/athletes/athlete-roster";
 import { Leaderboard } from "@/components/coach/athletes/leaderboard";
@@ -9,12 +10,13 @@ export default async function AthletesPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
   // Fetch coach's teams + members
   const { data: teams } = await supabase
     .from("teams")
     .select("id, name")
-    .eq("coach_id", user.id)
+    .eq("coach_id", effectiveCoachId)
     .order("name");
 
   const teamIds = (teams ?? []).map((t) => t.id);

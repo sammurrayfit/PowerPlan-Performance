@@ -145,9 +145,10 @@ function parseProgram(workbook: import("xlsx").WorkBook, athletes: Athlete[]): P
 interface ProgramImportProps {
   calendarId: string;
   athletes: Athlete[];
+  effectiveCoachId: string;
 }
 
-export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
+export function ProgramImport({ calendarId, athletes, effectiveCoachId }: ProgramImportProps) {
   const router = useRouter();
   const supabase = createClient();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -320,7 +321,7 @@ export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
           .from("calendars")
           .select("id")
           .eq("athlete_id", sheet.athleteId)
-          .eq("coach_id", user!.id)
+          .eq("coach_id", effectiveCoachId)
           .eq("name", "Pre-Activation")
           .maybeSingle();
 
@@ -329,7 +330,7 @@ export function ProgramImport({ calendarId, athletes }: ProgramImportProps) {
         } else {
           const { data: created } = await supabase
             .from("calendars")
-            .insert({ athlete_id: sheet.athleteId, coach_id: user!.id, name: "Pre-Activation", color: "#f59e0b" })
+            .insert({ athlete_id: sheet.athleteId, coach_id: effectiveCoachId, name: "Pre-Activation", color: "#f59e0b" })
             .select("id")
             .single();
           preActCalId = created?.id ?? undefined;
