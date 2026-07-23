@@ -2,7 +2,6 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { WorkoutBuilder } from "@/components/coach/calendar/workout-builder";
 import { AttendancePanel } from "@/components/coach/calendar/attendance-panel";
-import { LoggedDetailPanel } from "@/components/coach/calendar/logged-detail-panel";
 
 interface Props {
   params: Promise<{ id: string; wid: string }>;
@@ -155,7 +154,7 @@ export default async function WorkoutPage({ params, searchParams }: Props) {
     });
   }
 
-  const loggedDetailAthletes = athletes.map((a) => ({
+  const loggedResults = athletes.map((a) => ({
     athleteId: a.id,
     athleteName: a.full_name,
     setsByExercise: logsByAthleteExercise[a.id] ?? {},
@@ -172,6 +171,7 @@ export default async function WorkoutPage({ params, searchParams }: Props) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         initialOverrides={initialOverrides as any[]}
         maxesMap={maxesMap}
+        loggedResults={loggedResults}
         prevWorkoutId={prevWorkoutId}
         nextWorkoutId={nextWorkoutId}
         backUrl={backUrl ?? null}
@@ -179,14 +179,6 @@ export default async function WorkoutPage({ params, searchParams }: Props) {
       {athletes.length > 0 && (
         <div className="border-t pt-6">
           <AttendancePanel workoutId={wid} initialAttendance={initialAttendance} />
-        </div>
-      )}
-      {athletes.length > 0 && (
-        <div className="border-t pt-6">
-          <LoggedDetailPanel
-            exercises={exercises.map((e) => ({ id: e.id, name: e.exercise_name }))}
-            athletes={loggedDetailAthletes}
-          />
         </div>
       )}
     </div>

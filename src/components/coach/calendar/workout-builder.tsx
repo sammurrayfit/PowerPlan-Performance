@@ -32,6 +32,7 @@ import { ExercisePicker } from "./exercise-picker";
 import { ExcelImport, type ParsedExerciseRow } from "./excel-import";
 import { CopyWorkoutModal } from "./copy-workout-modal";
 import { Individualization } from "./individualization";
+import { LoggedResultsTable, type AthleteLog } from "./logged-results-table";
 import type { Database } from "@/lib/supabase/types";
 
 type Workout = Database["public"]["Tables"]["workouts"]["Row"];
@@ -82,6 +83,7 @@ interface WorkoutBuilderProps {
   athletes?: Athlete[];
   initialOverrides?: Override[];
   maxesMap?: Record<string, Record<string, number>>;
+  loggedResults?: AthleteLog[];
   prevWorkoutId?: string | null;
   nextWorkoutId?: string | null;
   backUrl?: string | null;
@@ -240,9 +242,9 @@ function ExerciseRow({
   );
 }
 
-type Tab = "prescription" | "individualize";
+type Tab = "prescription" | "individualize" | "logged";
 
-export function WorkoutBuilder({ workout, initialExercises, allExercises, calendarId, athletes = [], initialOverrides = [], maxesMap = {}, prevWorkoutId = null, nextWorkoutId = null, backUrl = null }: WorkoutBuilderProps) {
+export function WorkoutBuilder({ workout, initialExercises, allExercises, calendarId, athletes = [], initialOverrides = [], maxesMap = {}, loggedResults = [], prevWorkoutId = null, nextWorkoutId = null, backUrl = null }: WorkoutBuilderProps) {
   const supabase = createClient();
   const [exercises, setExercises] = useState<WorkoutExerciseRow[]>(initialExercises);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -576,6 +578,16 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
             </span>
           )}
         </button>
+        <button
+          onClick={() => setActiveTab("logged")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "logged"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Logged
+        </button>
       </div>
 
       {activeTab === "prescription" && (
@@ -695,6 +707,13 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
           athletes={athletes}
           initialOverrides={initialOverrides}
           maxesMap={maxesMap}
+        />
+      )}
+
+      {activeTab === "logged" && (
+        <LoggedResultsTable
+          exercises={individualizationExercises.map((e) => ({ id: e.id, name: e.exercise_name }))}
+          athletes={loggedResults}
         />
       )}
 
