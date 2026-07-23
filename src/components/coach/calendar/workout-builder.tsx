@@ -84,6 +84,7 @@ interface WorkoutBuilderProps {
   initialOverrides?: Override[];
   maxesMap?: Record<string, Record<string, number>>;
   loggedResults?: AthleteLog[];
+  initialTab?: Tab;
   prevWorkoutId?: string | null;
   nextWorkoutId?: string | null;
   backUrl?: string | null;
@@ -244,14 +245,14 @@ function ExerciseRow({
 
 type Tab = "prescription" | "individualize" | "logged";
 
-export function WorkoutBuilder({ workout, initialExercises, allExercises, calendarId, athletes = [], initialOverrides = [], maxesMap = {}, loggedResults = [], prevWorkoutId = null, nextWorkoutId = null, backUrl = null }: WorkoutBuilderProps) {
+export function WorkoutBuilder({ workout, initialExercises, allExercises, calendarId, athletes = [], initialOverrides = [], maxesMap = {}, loggedResults = [], initialTab, prevWorkoutId = null, nextWorkoutId = null, backUrl = null }: WorkoutBuilderProps) {
   const supabase = createClient();
   const [exercises, setExercises] = useState<WorkoutExerciseRow[]>(initialExercises);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isLocked, setIsLocked] = useState(workout.is_locked);
   const [title, setTitle] = useState(workout.title);
   const [notes, setNotes] = useState(workout.notes ?? "");
-  const [activeTab, setActiveTab] = useState<Tab>("prescription");
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? "prescription");
   const [viewAthleteId, setViewAthleteId] = useState<string>("");
 
   const overrideByWeAndAthlete = new Map<string, Override>();

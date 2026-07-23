@@ -5,12 +5,17 @@ import { AttendancePanel } from "@/components/coach/calendar/attendance-panel";
 
 interface Props {
   params: Promise<{ id: string; wid: string }>;
-  searchParams: Promise<{ athlete?: string; back?: string }>;
+  searchParams: Promise<{ athlete?: string; back?: string; tab?: string }>;
 }
+
+const VALID_TABS = ["prescription", "individualize", "logged"] as const;
 
 export default async function WorkoutPage({ params, searchParams }: Props) {
   const { id, wid } = await params;
-  const { athlete: athleteFilter, back: backUrl } = await searchParams;
+  const { athlete: athleteFilter, back: backUrl, tab } = await searchParams;
+  const initialTab = (VALID_TABS as readonly string[]).includes(tab ?? "")
+    ? (tab as (typeof VALID_TABS)[number])
+    : undefined;
   const supabase = await createClient();
 
   const [{ data: workout }, { data: rawExercises }, { data: allExercises }, { data: calendar }, { data: siblingWorkouts }] = await Promise.all([
@@ -172,6 +177,7 @@ export default async function WorkoutPage({ params, searchParams }: Props) {
         initialOverrides={initialOverrides as any[]}
         maxesMap={maxesMap}
         loggedResults={loggedResults}
+        initialTab={initialTab}
         prevWorkoutId={prevWorkoutId}
         nextWorkoutId={nextWorkoutId}
         backUrl={backUrl ?? null}

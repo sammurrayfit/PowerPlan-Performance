@@ -193,7 +193,7 @@ export default async function CoachDashboard() {
                   return (
                     <Link
                       key={w.id}
-                      href={`/coach/calendar/${w.calendar_id}/workout/${w.id}`}
+                      href={`/coach/calendar/${w.calendar_id}/workout/${w.id}${hasLogs ? "?tab=logged" : ""}`}
                       className="flex items-center gap-3 rounded-md px-3 py-2 hover:bg-muted/50 transition-colors -mx-3"
                     >
                       {isPast && hasLogs ? (
