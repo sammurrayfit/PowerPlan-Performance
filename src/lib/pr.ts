@@ -7,6 +7,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const UNITS = ["lbs", "kg", "seconds", "meters"] as const;
 export type Unit = typeof UNITS[number];
 
+// Epley estimated 1RM — converts a multi-rep lift to a comparable 1RM value
+export function epley1RM(weight: number, reps: number): number {
+  if (reps <= 1) return weight;
+  return Math.round(weight * (1 + reps / 30));
+}
+
 export async function autoRecordPR(
   supabase: SupabaseClient,
   athleteId: string,

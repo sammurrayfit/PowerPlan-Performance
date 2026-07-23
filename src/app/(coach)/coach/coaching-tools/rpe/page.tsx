@@ -8,8 +8,6 @@ export default async function RPEPage() {
   if (!user) return null;
   const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
-  const today = new Date().toISOString().split("T")[0];
-
   // Get coach's calendars
   const { data: calendars } = await supabase
     .from("calendars")
@@ -17,19 +15,6 @@ export default async function RPEPage() {
     .eq("coach_id", effectiveCoachId);
 
   const calendarIds = (calendars ?? []).map((c) => c.id);
-
-  // Today's workouts
-  const { data: workouts } = calendarIds.length > 0
-    ? await supabase
-        .from("workouts")
-        .select("id, title, calendar_id")
-        .in("calendar_id", calendarIds)
-        .eq("date", today)
-        .order("title")
-    : { data: [] };
-
-  const workoutIds = (workouts ?? []).map((w) => w.id);
-  const workoutTitles = Object.fromEntries((workouts ?? []).map((w) => [w.id, w.title]));
 
   // Resolve all athletes under those calendars
   const teamIds = (calendars ?? []).map((c) => c.team_id).filter(Boolean) as string[];
@@ -56,8 +41,7 @@ export default async function RPEPage() {
 
   return (
     <RPEMonitor
-      workoutIds={workoutIds}
-      workoutTitles={workoutTitles}
+      calendarIds={calendarIds}
       athletes={(athletes ?? []) as { id: string; full_name: string }[]}
     />
   );

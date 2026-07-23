@@ -5,12 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { FileSpreadsheet, Upload, AlertCircle, CheckCircle2 } from "lucide-react";
 import { bulkImportMaxes, type BulkMaxRow, type BulkImportResult } from "@/app/(coach)/coach/athletes/actions";
-
-// Epley estimated 1RM
-function epley1RM(weight: number, reps: number): number {
-  if (reps <= 1) return weight;
-  return Math.round(weight * (1 + reps / 30));
-}
+import { epley1RM } from "@/lib/pr";
 
 function detectCols(headers: string[]) {
   const h = headers.map((s) => String(s ?? "").toLowerCase().trim());

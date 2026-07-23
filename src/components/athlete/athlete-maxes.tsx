@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { TrendingUp, Trash2, ChevronDown, ChevronRight, Check } from "lucide-react";
 import { addAthleteMax, deleteAthleteMax } from "@/app/(athlete)/athlete/prs/actions";
-import { UNITS, type Unit } from "@/lib/pr";
+import { UNITS, epley1RM, type Unit } from "@/lib/pr";
 
 interface Exercise {
   id: string;
@@ -32,6 +32,7 @@ export function AthleteMaxes({ currentMaxes, maxHistory, exercises }: Props) {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Exercise | null>(null);
   const [weight, setWeight] = useState("");
+  const [reps, setReps] = useState("1");
   const [unit, setUnit] = useState<Unit>("lbs");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -55,13 +56,17 @@ export function AthleteMaxes({ currentMaxes, maxHistory, exercises }: Props) {
     setSelected(null);
     setSearch("");
     setWeight("");
+    setReps("1");
     setSaved(false);
   }
+
+  const repsNum = Number(reps) || 1;
+  const estimated1RM = weight ? epley1RM(Number(weight), repsNum) : null;
 
   async function handleSave() {
     if (!selected || !weight) return;
     setSaving(true);
-    await addAthleteMax(selected.id, Number(weight), new Date().toISOString().split("T")[0], unit);
+    await addAthleteMax(selected.id, epley1RM(Number(weight), repsNum), new Date().toISOString().split("T")[0], unit);
     setSaving(false);
     setSaved(true);
     setTimeout(reset, 1000);
@@ -142,6 +147,20 @@ export function AthleteMaxes({ currentMaxes, maxHistory, exercises }: Props) {
             disabled={!selected}
           />
 
+          {/* Reps input */}
+          <Input
+            type="number"
+            min="1"
+            step="1"
+            placeholder="reps"
+            value={reps}
+            onChange={(e) => { setReps(e.target.value); setSaved(false); }}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSave(); }}
+            className="h-9 text-sm w-16"
+            disabled={!selected}
+            title="Reps performed"
+          />
+
           {/* Unit selector */}
           <select
             value={unit}
@@ -175,6 +194,9 @@ export function AthleteMaxes({ currentMaxes, maxHistory, exercises }: Props) {
             <button onClick={reset} className="underline underline-offset-2 hover:text-foreground">
               clear
             </button>
+            {repsNum > 1 && estimated1RM != null && (
+              <span className="ml-1.5">· ≈ {estimated1RM} {unit} est. 1RM (Epley)</span>
+            )}
           </p>
         )}
       </div>

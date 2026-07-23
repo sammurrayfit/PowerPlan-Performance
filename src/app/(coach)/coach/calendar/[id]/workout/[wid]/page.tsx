@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { WorkoutBuilder } from "@/components/coach/calendar/workout-builder";
 import { AttendancePanel } from "@/components/coach/calendar/attendance-panel";
+import { LoggedDetailPanel } from "@/components/coach/calendar/logged-detail-panel";
 
 interface Props {
   params: Promise<{ id: string; wid: string }>;
@@ -111,15 +112,23 @@ export default async function WorkoutPage({ params, searchParams }: Props) {
     }
   }
 
-  // Fetch existing attendance records for this workout
+  // Fetch existing attendance records and logged sets for this workout
   const athleteIds = athletes.map((a) => a.id);
-  const { data: attendanceRaw } = athleteIds.length > 0
-    ? await supabase
-        .from("attendance")
-        .select("athlete_id, status, rpe_pre, rpe_post")
-        .eq("workout_id", wid)
-        .in("athlete_id", athleteIds)
-    : { data: [] };
+  const [{ data: attendanceRaw }, { data: workoutLogsRaw }] = athleteIds.length > 0
+    ? await Promise.all([
+        supabase
+          .from("attendance")
+          .select("athlete_id, status, rpe_pre, rpe_post")
+          .eq("workout_id", wid)
+          .in("athlete_id", athleteIds),
+        supabase
+          .from("exercise_logs")
+          .select("workout_exercise_id, athlete_id, set_number, reps_completed, load_completed, rpe")
+          .eq("workout_id", wid)
+          .in("athlete_id", athleteIds)
+          .order("set_number"),
+      ])
+    : [{ data: [] }, { data: [] }];
 
   const attendanceByAthlete = Object.fromEntries(
     (attendanceRaw ?? []).map((a) => [a.athlete_id, a])
@@ -131,6 +140,25 @@ export default async function WorkoutPage({ params, searchParams }: Props) {
     status: (attendanceByAthlete[a.id]?.status ?? null) as "present" | "late" | "absent" | null,
     rpe_pre: attendanceByAthlete[a.id]?.rpe_pre ?? null,
     rpe_post: attendanceByAthlete[a.id]?.rpe_post ?? null,
+  }));
+
+  // Build athleteId -> workoutExerciseId -> logged sets, for the coach-facing detail view
+  const logsByAthleteExercise: Record<string, Record<string, { set_number: number; reps_completed: number | null; load_completed: number | null; rpe: number | null }[]>> = {};
+  for (const l of workoutLogsRaw ?? []) {
+    if (!logsByAthleteExercise[l.athlete_id]) logsByAthleteExercise[l.athlete_id] = {};
+    if (!logsByAthleteExercise[l.athlete_id][l.workout_exercise_id]) logsByAthleteExercise[l.athlete_id][l.workout_exercise_id] = [];
+    logsByAthleteExercise[l.athlete_id][l.workout_exercise_id].push({
+      set_number: l.set_number,
+      reps_completed: l.reps_completed,
+      load_completed: l.load_completed,
+      rpe: l.rpe,
+    });
+  }
+
+  const loggedDetailAthletes = athletes.map((a) => ({
+    athleteId: a.id,
+    athleteName: a.full_name,
+    setsByExercise: logsByAthleteExercise[a.id] ?? {},
   }));
 
   return (
@@ -151,6 +179,14 @@ export default async function WorkoutPage({ params, searchParams }: Props) {
       {athletes.length > 0 && (
         <div className="border-t pt-6">
           <AttendancePanel workoutId={wid} initialAttendance={initialAttendance} />
+        </div>
+      )}
+      {athletes.length > 0 && (
+        <div className="border-t pt-6">
+          <LoggedDetailPanel
+            exercises={exercises.map((e) => ({ id: e.id, name: e.exercise_name }))}
+            athletes={loggedDetailAthletes}
+          />
         </div>
       )}
     </div>

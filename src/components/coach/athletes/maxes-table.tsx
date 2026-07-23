@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import { addMax, deleteMax } from "@/app/(coach)/coach/athletes/actions";
-import { UNITS, type Unit } from "@/lib/pr";
+import { UNITS, epley1RM, type Unit } from "@/lib/pr";
 
 interface Exercise {
   id: string;
@@ -43,6 +43,7 @@ function AddMaxDialog({
   const [search, setSearch] = useState("");
   const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
   const [value, setValue] = useState("");
+  const [reps, setReps] = useState("1");
   const [unit, setUnit] = useState<Unit>("lbs");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
 
@@ -50,11 +51,14 @@ function AddMaxDialog({
     .filter((e) => e.name.toLowerCase().includes(search.toLowerCase()))
     .slice(0, 20);
 
+  const repsNum = Number(reps) || 1;
+  const estimated1RM = value ? epley1RM(Number(value), repsNum) : null;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedExercise || !value) return;
     setLoading(true);
-    await addMax(athleteId, selectedExercise.id, Number(value), date, unit);
+    await addMax(athleteId, selectedExercise.id, epley1RM(Number(value), repsNum), date, unit);
     onClose();
   }
 
@@ -99,8 +103,8 @@ function AddMaxDialog({
             </div>
           )}
         </div>
-        <div className="grid grid-cols-3 gap-3">
-          <div className="space-y-1.5 col-span-1">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
             <Label>Value</Label>
             <Input
               type="number"
@@ -112,7 +116,18 @@ function AddMaxDialog({
               required
             />
           </div>
-          <div className="space-y-1.5 col-span-1">
+          <div className="space-y-1.5">
+            <Label>Reps</Label>
+            <Input
+              type="number"
+              min="1"
+              step="1"
+              value={reps}
+              onChange={(e) => setReps(e.target.value)}
+              placeholder="1"
+            />
+          </div>
+          <div className="space-y-1.5">
             <Label>Unit</Label>
             <select
               value={unit}
@@ -122,7 +137,7 @@ function AddMaxDialog({
               {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
             </select>
           </div>
-          <div className="space-y-1.5 col-span-1">
+          <div className="space-y-1.5">
             <Label>Date</Label>
             <Input
               type="date"
@@ -132,6 +147,11 @@ function AddMaxDialog({
             />
           </div>
         </div>
+        {repsNum > 1 && estimated1RM != null && (
+          <p className="text-xs text-muted-foreground">
+            ≈ {estimated1RM} {unit} estimated 1RM (Epley formula)
+          </p>
+        )}
       </div>
       <DialogFooter className="mt-4">
         <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>

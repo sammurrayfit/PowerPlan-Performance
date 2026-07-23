@@ -79,6 +79,14 @@ function calcWeight(load: number | null, loadType: string | null, max: number | 
   return Math.round((load / 100) * max);
 }
 
+// The weight to pre-fill into an unlogged set: the computed %1RM weight, or
+// the prescribed weight itself for a flat/absolute prescription.
+function defaultLoad(load: number | null, loadType: string | null, calcLbs: number | null): number | null {
+  if (loadType === "percent_1rm") return calcLbs;
+  if (loadType === "absolute") return load;
+  return null;
+}
+
 function supersetColor(group: string): string {
   const idx = group.toUpperCase().charCodeAt(0) - 65;
   return `hsl(${idx * 37 + 200}, 70%, 50%)`;
@@ -102,13 +110,14 @@ function ExerciseCard({
   const effectiveLoad = exercise.override?.load ?? exercise.load;
   const effectiveLoadType = exercise.override?.load_type ?? exercise.load_type;
   const calcLbs = calcWeight(effectiveLoad, effectiveLoadType, exercise.max);
+  const suggestedLoad = defaultLoad(effectiveLoad, effectiveLoadType, calcLbs);
 
   const buildInitialRows = useCallback((): SetRow[] => {
     return Array.from({ length: effectiveSets }, (_, i) => {
       const existing = exercise.logs.find((l) => l.set_number === i + 1);
       return {
         reps: existing?.reps_completed != null ? String(existing.reps_completed) : "",
-        load: existing?.load_completed != null ? String(existing.load_completed) : calcLbs != null ? String(calcLbs) : "",
+        load: existing?.load_completed != null ? String(existing.load_completed) : suggestedLoad != null ? String(suggestedLoad) : "",
         rpe: existing?.rpe != null ? String(existing.rpe) : "",
         saved: !!existing,
         logId: existing?.id ?? null,
@@ -305,7 +314,7 @@ function ExerciseCard({
                   type="number"
                   min={0}
                   step={0.5}
-                  placeholder={calcLbs != null ? String(calcLbs) : "—"}
+                  placeholder={suggestedLoad != null ? String(suggestedLoad) : "—"}
                   value={row.load}
                   onChange={(e) => updateRow(i, "load", e.target.value)}
                   onBlur={() => { if (row.reps || row.load) saveSet(i); }}
