@@ -87,6 +87,14 @@ function defaultLoad(load: number | null, loadType: string | null, calcLbs: numb
   return null;
 }
 
+// The reps to pre-fill into an unlogged set: the leading number in the
+// prescription ("8" -> 8, "6 each" -> 6), or none for non-numeric
+// prescriptions ("AMRAP") where a default would be misleading.
+function defaultReps(prescribedReps: string): string {
+  const n = parseInt(prescribedReps, 10);
+  return Number.isNaN(n) ? "" : String(n);
+}
+
 // The "D" superset group is a convention for optional accessory work, shown
 // after the required A/B/C blocks. Flag the exercise that starts that block
 // so a divider can be rendered just above it.
@@ -125,7 +133,7 @@ function ExerciseCard({
     return Array.from({ length: effectiveSets }, (_, i) => {
       const existing = exercise.logs.find((l) => l.set_number === i + 1);
       return {
-        reps: existing?.reps_completed != null ? String(existing.reps_completed) : "",
+        reps: existing?.reps_completed != null ? String(existing.reps_completed) : defaultReps(effectiveReps),
         load: existing?.load_completed != null ? String(existing.load_completed) : suggestedLoad != null ? String(suggestedLoad) : "",
         rpe: existing?.rpe != null ? String(existing.rpe) : "",
         saved: !!existing,
