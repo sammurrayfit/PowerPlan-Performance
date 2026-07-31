@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { Fragment, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -85,6 +85,15 @@ function defaultLoad(load: number | null, loadType: string | null, calcLbs: numb
   if (loadType === "percent_1rm") return calcLbs;
   if (loadType === "absolute") return load;
   return null;
+}
+
+// The "D" superset group is a convention for optional accessory work, shown
+// after the required A/B/C blocks. Flag the exercise that starts that block
+// so a divider can be rendered just above it.
+function startsOptionalBlock(group: string | null, prevGroup: string | null): boolean {
+  const g = (group ?? "").trim().toUpperCase();
+  const prev = (prevGroup ?? "").trim().toUpperCase();
+  return g.startsWith("D") && !prev.startsWith("D");
 }
 
 function supersetColor(group: string): string {
@@ -569,14 +578,22 @@ export function WorkoutLogger({
                 </div>
               </>
             )}
-            {mainExercises.map((ex) => (
-              <ExerciseCard
-                key={ex.id}
-                exercise={ex}
-                athleteId={athleteId}
-                workoutId={workout.id}
-                onSaveSet={onSaveSet}
-              />
+            {mainExercises.map((ex, i) => (
+              <Fragment key={ex.id}>
+                {startsOptionalBlock(ex.superset_group, mainExercises[i - 1]?.superset_group ?? null) && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <div className="h-px flex-1 bg-border" />
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Optional</span>
+                    <div className="h-px flex-1 bg-border" />
+                  </div>
+                )}
+                <ExerciseCard
+                  exercise={ex}
+                  athleteId={athleteId}
+                  workoutId={workout.id}
+                  onSaveSet={onSaveSet}
+                />
+              </Fragment>
             ))}
           </div>
         )}

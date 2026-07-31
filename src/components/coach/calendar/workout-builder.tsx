@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { Fragment, useState, useCallback } from "react";
 import Link from "next/link";
 import {
   DndContext,
@@ -91,6 +91,29 @@ interface WorkoutBuilderProps {
 }
 
 const LOAD_TYPE_LABELS = { absolute: "lbs", percent_1rm: "%", bodyweight: "BW" };
+
+// The "D" superset group is a convention for optional accessory work, shown
+// after the required A/B/C blocks. Flag the row that starts that block so a
+// divider can be rendered just above it.
+function startsOptionalBlock(group: string | null, prevGroup: string | null): boolean {
+  const g = (group ?? "").trim().toUpperCase();
+  const prev = (prevGroup ?? "").trim().toUpperCase();
+  return g.startsWith("D") && !prev.startsWith("D");
+}
+
+function OptionalDivider({ colSpan }: { colSpan: number }) {
+  return (
+    <tr>
+      <td colSpan={colSpan} className="px-2 pt-3 pb-1">
+        <div className="flex items-center gap-2">
+          <div className="h-px flex-1 bg-border" />
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Optional</span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+      </td>
+    </tr>
+  );
+}
 
 function ExerciseRow({
   row,
@@ -627,14 +650,19 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
                   </tr>
                 </thead>
                 <tbody>
-                  {displayedExercises.map((row) => (
-                    <tr key={row.id} className="border-b">
-                      <td className="px-2 py-2 font-bold text-xs uppercase">{row.superset_group ?? "—"}</td>
-                      <td className="px-2 py-2 font-medium">{row.exercise_name}</td>
-                      <td className="px-2 py-2">{row.sets ?? "—"}</td>
-                      <td className="px-2 py-2">{row.reps ?? "—"}</td>
-                      <td className="px-2 py-2 text-blue-600">{row.notes ?? "—"}</td>
-                    </tr>
+                  {displayedExercises.map((row, i) => (
+                    <Fragment key={row.id}>
+                      {startsOptionalBlock(row.superset_group, displayedExercises[i - 1]?.superset_group ?? null) && (
+                        <OptionalDivider colSpan={5} />
+                      )}
+                      <tr className="border-b">
+                        <td className="px-2 py-2 font-bold text-xs uppercase">{row.superset_group ?? "—"}</td>
+                        <td className="px-2 py-2 font-medium">{row.exercise_name}</td>
+                        <td className="px-2 py-2">{row.sets ?? "—"}</td>
+                        <td className="px-2 py-2">{row.reps ?? "—"}</td>
+                        <td className="px-2 py-2 text-blue-600">{row.notes ?? "—"}</td>
+                      </tr>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -668,14 +696,18 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
                 </thead>
                 <SortableContext items={exercises.map((e) => e.id)} strategy={verticalListSortingStrategy}>
                   <tbody>
-                    {exercises.map((row) => (
-                      <ExerciseRow
-                        key={row.id}
-                        row={row}
-                        onUpdate={handleUpdate}
-                        onDelete={handleDelete}
-                        onCopy={handleCopy}
-                      />
+                    {exercises.map((row, i) => (
+                      <Fragment key={row.id}>
+                        {startsOptionalBlock(row.superset_group, exercises[i - 1]?.superset_group ?? null) && (
+                          <OptionalDivider colSpan={13} />
+                        )}
+                        <ExerciseRow
+                          row={row}
+                          onUpdate={handleUpdate}
+                          onDelete={handleDelete}
+                          onCopy={handleCopy}
+                        />
+                      </Fragment>
                     ))}
                   </tbody>
                 </SortableContext>
