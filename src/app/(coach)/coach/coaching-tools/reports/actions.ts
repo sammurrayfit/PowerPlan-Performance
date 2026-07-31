@@ -91,6 +91,18 @@ export type MaxRow = {
   history: { date: string; value: number }[];
 };
 
+export type CompletedWorkoutRow = {
+  workoutId: string;
+  calendarId: string;
+  date: string;
+  title: string;
+  athleteId: string;
+  athleteName: string;
+  attendanceStatus: "present" | "late" | "absent" | null;
+  loggedExercises: number;
+  totalExercises: number;
+};
+
 // ── 1. Attendance ─────────────────────────────────────────────────────────────
 
 export async function fetchAttendanceReport(
@@ -149,6 +161,107 @@ export async function fetchAttendanceReport(
       pct: total > 0 ? Math.round(((c.present + c.late) / total) * 100) : 0,
     };
   });
+}
+
+// ── 1b. Completed workouts ────────────────────────────────────────────────────
+
+export async function fetchCompletedWorkouts(
+  coachId: string,
+  range: string,
+  athleteId: string
+): Promise<CompletedWorkoutRow[]> {
+  const supabase = await createClient();
+  const { start, end } = dateRangeBounds(range);
+
+  // Calendars are either shared across a team (team_id) or assigned to one
+  // athlete individually (athlete_id) — a workout on a shared calendar
+  // applies to every team member, so it's expanded into one row per athlete
+  // below rather than one row per workout.
+  const { data: calendars } = await supabase
+    .from("calendars")
+    .select("id, team_id, athlete_id")
+    .eq("coach_id", coachId);
+  if (!calendars || calendars.length === 0) return [];
+
+  const teamIds = [...new Set(calendars.map((c) => c.team_id).filter(Boolean))] as string[];
+  const { data: memberships } = teamIds.length > 0
+    ? await supabase.from("team_memberships").select("team_id, athlete_id").in("team_id", teamIds)
+    : { data: [] };
+
+  const athletesByTeam: Record<string, string[]> = {};
+  for (const m of memberships ?? []) {
+    (athletesByTeam[m.team_id] ??= []).push(m.athlete_id);
+  }
+
+  const athletesByCalendar: Record<string, string[]> = {};
+  for (const c of calendars) {
+    if (c.athlete_id) athletesByCalendar[c.id] = [c.athlete_id];
+    else if (c.team_id) athletesByCalendar[c.id] = athletesByTeam[c.team_id] ?? [];
+  }
+
+  const allAthleteIds = [...new Set(Object.values(athletesByCalendar).flat())];
+  if (allAthleteIds.length === 0) return [];
+  const targetAthletes = athleteId === "all" ? allAthleteIds : [athleteId];
+
+  const calIds = calendars.map((c) => c.id);
+  const { data: workouts } = await supabase
+    .from("workouts")
+    .select("id, calendar_id, date, title")
+    .in("calendar_id", calIds)
+    .neq("title", "Pre-Activation")
+    .gte("date", start)
+    .lte("date", end)
+    .order("date", { ascending: false });
+  if (!workouts || workouts.length === 0) return [];
+
+  const workoutIds = workouts.map((w) => w.id);
+
+  const [{ data: profiles }, { data: attendance }, { data: exercises }, { data: logs }] = await Promise.all([
+    supabase.from("profiles").select("id, full_name").in("id", targetAthletes),
+    supabase.from("attendance").select("workout_id, athlete_id, status").in("workout_id", workoutIds).in("athlete_id", targetAthletes),
+    supabase.from("workout_exercises").select("id, workout_id").in("workout_id", workoutIds),
+    supabase.from("exercise_logs").select("workout_id, athlete_id, workout_exercise_id").in("workout_id", workoutIds).in("athlete_id", targetAthletes),
+  ]);
+
+  const nameById = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.full_name]));
+
+  const totalExByWorkout: Record<string, number> = {};
+  for (const e of exercises ?? []) {
+    totalExByWorkout[e.workout_id] = (totalExByWorkout[e.workout_id] ?? 0) + 1;
+  }
+
+  const attendanceByWA: Record<string, "present" | "late" | "absent"> = {};
+  for (const a of attendance ?? []) {
+    attendanceByWA[`${a.workout_id}|${a.athlete_id}`] = a.status;
+  }
+
+  const loggedExByWA: Record<string, Set<string>> = {};
+  for (const l of logs ?? []) {
+    const key = `${l.workout_id}|${l.athlete_id}`;
+    (loggedExByWA[key] ??= new Set()).add(l.workout_exercise_id);
+  }
+
+  const rows: CompletedWorkoutRow[] = [];
+  for (const w of workouts) {
+    const athletesForThisCalendar = (athletesByCalendar[w.calendar_id] ?? []).filter((id) => targetAthletes.includes(id));
+    for (const aid of athletesForThisCalendar) {
+      const key = `${w.id}|${aid}`;
+      rows.push({
+        workoutId: w.id,
+        calendarId: w.calendar_id,
+        date: w.date,
+        title: w.title,
+        athleteId: aid,
+        athleteName: nameById[aid] ?? "Unknown",
+        attendanceStatus: attendanceByWA[key] ?? null,
+        loggedExercises: loggedExByWA[key]?.size ?? 0,
+        totalExercises: totalExByWorkout[w.id] ?? 0,
+      });
+    }
+  }
+
+  rows.sort((a, b) => b.date.localeCompare(a.date) || a.athleteName.localeCompare(b.athleteName));
+  return rows;
 }
 
 // ── 2. Volume ─────────────────────────────────────────────────────────────────

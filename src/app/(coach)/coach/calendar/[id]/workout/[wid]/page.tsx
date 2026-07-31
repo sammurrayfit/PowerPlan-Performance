@@ -26,7 +26,7 @@ export default async function WorkoutPage({ params, searchParams }: Props) {
       .eq("workout_id", wid)
       .order("sort_order"),
     supabase.from("exercises").select("id, name, category_id, muscle_groups").order("name"),
-    supabase.from("calendars").select("team_id").eq("id", id).single(),
+    supabase.from("calendars").select("team_id, athlete_id").eq("id", id).single(),
     supabase.from("workouts").select("id, date").eq("calendar_id", id).order("date"),
   ]);
 
@@ -72,46 +72,52 @@ export default async function WorkoutPage({ params, searchParams }: Props) {
   let initialOverrides: object[] = [];
   let maxesMap: Record<string, Record<string, number>> = {};
 
+  // Calendars are either shared across a team (team_id) or assigned to one
+  // athlete individually (athlete_id) — every U15 athlete's actual training
+  // (Upper Body, Lower Body, etc.) lives on their individual calendar, so
+  // both cases need to resolve to the same athlete list below.
+  let calendarAthleteIds: string[] = [];
   if (calendar?.team_id) {
     const { data: memberships } = await supabase
       .from("team_memberships")
       .select("athlete_id")
       .eq("team_id", calendar.team_id);
+    calendarAthleteIds = (memberships ?? []).map((m) => m.athlete_id);
+  } else if (calendar?.athlete_id) {
+    calendarAthleteIds = [calendar.athlete_id];
+  }
 
-    const athleteIds = (memberships ?? []).map((m) => m.athlete_id);
+  if (calendarAthleteIds.length > 0) {
+    const [{ data: profiles }, { data: overrides }, { data: maxesRaw }] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", calendarAthleteIds)
+        .order("full_name"),
+      exerciseIds.length > 0
+        ? supabase
+            .from("athlete_exercise_overrides")
+            .select("*")
+            .in("workout_exercise_id", exerciseIds)
+        : Promise.resolve({ data: [] }),
+      baseExerciseIds.length > 0
+        ? supabase
+            .from("maxes")
+            .select("athlete_id, exercise_id, value, date_recorded")
+            .in("athlete_id", calendarAthleteIds)
+            .in("exercise_id", baseExerciseIds)
+            .order("date_recorded", { ascending: false })
+        : Promise.resolve({ data: [] }),
+    ]);
 
-    if (athleteIds.length > 0) {
-      const [{ data: profiles }, { data: overrides }, { data: maxesRaw }] = await Promise.all([
-        supabase
-          .from("profiles")
-          .select("id, full_name")
-          .in("id", athleteIds)
-          .order("full_name"),
-        exerciseIds.length > 0
-          ? supabase
-              .from("athlete_exercise_overrides")
-              .select("*")
-              .in("workout_exercise_id", exerciseIds)
-          : Promise.resolve({ data: [] }),
-        baseExerciseIds.length > 0
-          ? supabase
-              .from("maxes")
-              .select("athlete_id, exercise_id, value, date_recorded")
-              .in("athlete_id", athleteIds)
-              .in("exercise_id", baseExerciseIds)
-              .order("date_recorded", { ascending: false })
-          : Promise.resolve({ data: [] }),
-      ]);
+    athletes = profiles ?? [];
+    initialOverrides = overrides ?? [];
 
-      athletes = profiles ?? [];
-      initialOverrides = overrides ?? [];
-
-      // Build maxesMap: athleteId -> exerciseId -> latest max value
-      for (const m of maxesRaw ?? []) {
-        if (!maxesMap[m.athlete_id]) maxesMap[m.athlete_id] = {};
-        if (!maxesMap[m.athlete_id][m.exercise_id]) {
-          maxesMap[m.athlete_id][m.exercise_id] = Number(m.value);
-        }
+    // Build maxesMap: athleteId -> exerciseId -> latest max value
+    for (const m of maxesRaw ?? []) {
+      if (!maxesMap[m.athlete_id]) maxesMap[m.athlete_id] = {};
+      if (!maxesMap[m.athlete_id][m.exercise_id]) {
+        maxesMap[m.athlete_id][m.exercise_id] = Number(m.value);
       }
     }
   }

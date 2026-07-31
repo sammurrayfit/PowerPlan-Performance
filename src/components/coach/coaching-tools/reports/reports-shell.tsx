@@ -3,11 +3,13 @@
 import { useState, useEffect, useTransition } from "react";
 import {
   fetchAttendanceReport,
+  fetchCompletedWorkouts,
   fetchVolumeReport,
   fetchPRReport,
   fetchMaxProgressionReport,
   fetchRPEReport,
   type AttendanceRow,
+  type CompletedWorkoutRow,
   type VolumeWeek,
   type VolumeRow,
   type PRRow,
@@ -17,13 +19,14 @@ import {
   type RPEPoint,
 } from "@/app/(coach)/coach/coaching-tools/reports/actions";
 import { AttendanceReport } from "./attendance-report";
+import { CompletedWorkoutsReport } from "./completed-workouts-report";
 import { VolumeReport } from "./volume-report";
 import { PRReport } from "./pr-report";
 import { MaxProgressionReport } from "./max-progression-report";
 import { RPEReport } from "./rpe-report";
 import { BarChart2, TableProperties, Loader2 } from "lucide-react";
 
-type ReportType = "attendance" | "volume" | "prs" | "maxes" | "rpe";
+type ReportType = "attendance" | "completed" | "volume" | "prs" | "maxes" | "rpe";
 type DateRange = "7d" | "30d" | "90d" | "all";
 type ViewMode = "chart" | "table";
 
@@ -38,6 +41,7 @@ interface Props {
 
 const REPORT_TABS: { id: ReportType; label: string }[] = [
   { id: "attendance", label: "Attendance" },
+  { id: "completed",  label: "Completed Workouts" },
   { id: "volume",     label: "Volume & Load" },
   { id: "prs",        label: "PR History" },
   { id: "maxes",      label: "Max Progression" },
@@ -61,6 +65,7 @@ export function ReportsShell({ coachId, athletes, exercises }: Props) {
 
   // Data states
   const [attendanceData, setAttendanceData] = useState<AttendanceRow[] | null>(null);
+  const [completedData, setCompletedData] = useState<CompletedWorkoutRow[] | null>(null);
   const [volumeData, setVolumeData] = useState<{ weeks: VolumeWeek[]; rows: VolumeRow[]; athleteNames: string[] } | null>(null);
   const [prData, setPrData] = useState<{ rows: PRRow[]; chartData: unknown[] } | null>(null);
   const [maxData, setMaxData] = useState<{ points: MaxPoint[]; rows: MaxRow[]; exerciseIds: string[] } | null>(null);
@@ -68,6 +73,7 @@ export function ReportsShell({ coachId, athletes, exercises }: Props) {
 
   function clearData() {
     setAttendanceData(null);
+    setCompletedData(null);
     setVolumeData(null);
     setPrData(null);
     setMaxData(null);
@@ -80,6 +86,9 @@ export function ReportsShell({ coachId, athletes, exercises }: Props) {
       if (report === "attendance") {
         const d = await fetchAttendanceReport(coachId, range, athleteId);
         setAttendanceData(d);
+      } else if (report === "completed") {
+        const d = await fetchCompletedWorkouts(coachId, range, athleteId);
+        setCompletedData(d);
       } else if (report === "volume") {
         const d = await fetchVolumeReport(coachId, range, athleteId);
         setVolumeData(d);
@@ -162,6 +171,7 @@ export function ReportsShell({ coachId, athletes, exercises }: Props) {
         )}
 
         {/* Chart / Table toggle */}
+        {report !== "completed" && (
         <div className="flex rounded-md border overflow-hidden text-sm ml-auto">
           <button
             onClick={() => setViewMode("chart")}
@@ -186,6 +196,7 @@ export function ReportsShell({ coachId, athletes, exercises }: Props) {
             Table
           </button>
         </div>
+        )}
       </div>
 
       {/* ── Content ── */}
@@ -198,6 +209,9 @@ export function ReportsShell({ coachId, athletes, exercises }: Props) {
         <>
           {report === "attendance" && attendanceData && (
             <AttendanceReport data={attendanceData} viewMode={viewMode} />
+          )}
+          {report === "completed" && completedData && (
+            <CompletedWorkoutsReport rows={completedData} />
           )}
           {report === "volume" && volumeData && (
             <VolumeReport
