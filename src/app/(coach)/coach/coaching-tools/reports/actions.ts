@@ -168,10 +168,11 @@ export async function fetchAttendanceReport(
 export async function fetchCompletedWorkouts(
   coachId: string,
   range: string,
-  athleteId: string
+  athleteId: string,
+  specificDate?: string | null
 ): Promise<CompletedWorkoutRow[]> {
   const supabase = await createClient();
-  const { start, end } = dateRangeBounds(range);
+  const { start, end } = specificDate ? { start: specificDate, end: specificDate } : dateRangeBounds(range);
 
   // Calendars are either shared across a team (team_id) or assigned to one
   // athlete individually (athlete_id) — a workout on a shared calendar

@@ -58,6 +58,7 @@ const DATE_RANGES: { id: DateRange; label: string }[] = [
 export function ReportsShell({ coachId, athletes, exercises }: Props) {
   const [report, setReport] = useState<ReportType>("attendance");
   const [range, setRange] = useState<DateRange>("30d");
+  const [specificDate, setSpecificDate] = useState(""); // completed-workouts only: overrides range when set
   const [athleteId, setAthleteId] = useState("all");
   const [exerciseId, setExerciseId] = useState("all");
   const [viewMode, setViewMode] = useState<ViewMode>("chart");
@@ -87,7 +88,7 @@ export function ReportsShell({ coachId, athletes, exercises }: Props) {
         const d = await fetchAttendanceReport(coachId, range, athleteId);
         setAttendanceData(d);
       } else if (report === "completed") {
-        const d = await fetchCompletedWorkouts(coachId, range, athleteId);
+        const d = await fetchCompletedWorkouts(coachId, range, athleteId, specificDate || null);
         setCompletedData(d);
       } else if (report === "volume") {
         const d = await fetchVolumeReport(coachId, range, athleteId);
@@ -104,7 +105,7 @@ export function ReportsShell({ coachId, athletes, exercises }: Props) {
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report, range, athleteId, exerciseId, coachId]);
+  }, [report, range, specificDate, athleteId, exerciseId, coachId]);
 
   return (
     <div className="space-y-5">
@@ -128,13 +129,13 @@ export function ReportsShell({ coachId, athletes, exercises }: Props) {
       {/* ── Filter bar ── */}
       <div className="flex flex-wrap items-center gap-3">
         {/* Date range */}
-        <div className="flex rounded-md border overflow-hidden text-sm">
+        <div className={`flex rounded-md border overflow-hidden text-sm ${specificDate ? "opacity-40" : ""}`}>
           {DATE_RANGES.map(({ id, label }) => (
             <button
               key={id}
-              onClick={() => setRange(id)}
+              onClick={() => { setRange(id); setSpecificDate(""); }}
               className={`px-3 py-1.5 transition-colors ${
-                range === id
+                range === id && !specificDate
                   ? "bg-foreground text-background font-medium"
                   : "text-muted-foreground hover:bg-muted"
               }`}
@@ -143,6 +144,27 @@ export function ReportsShell({ coachId, athletes, exercises }: Props) {
             </button>
           ))}
         </div>
+
+        {/* Pick a specific day (completed workouts only) */}
+        {report === "completed" && (
+          <div className="flex items-center gap-1">
+            <input
+              type="date"
+              value={specificDate}
+              onChange={(e) => setSpecificDate(e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            />
+            {specificDate && (
+              <button
+                onClick={() => setSpecificDate("")}
+                className="text-xs text-muted-foreground hover:text-foreground px-1"
+                title="Clear date"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Athlete filter */}
         <select
