@@ -88,6 +88,7 @@ interface WorkoutBuilderProps {
   prevWorkoutId?: string | null;
   nextWorkoutId?: string | null;
   backUrl?: string | null;
+  dGroupOptional?: boolean;
 }
 
 const LOAD_TYPE_LABELS = { absolute: "lbs", percent_1rm: "%", bodyweight: "BW" };
@@ -268,7 +269,7 @@ function ExerciseRow({
 
 type Tab = "prescription" | "individualize" | "logged";
 
-export function WorkoutBuilder({ workout, initialExercises, allExercises, calendarId, athletes = [], initialOverrides = [], maxesMap = {}, loggedResults = [], initialTab, prevWorkoutId = null, nextWorkoutId = null, backUrl = null }: WorkoutBuilderProps) {
+export function WorkoutBuilder({ workout, initialExercises, allExercises, calendarId, athletes = [], initialOverrides = [], maxesMap = {}, loggedResults = [], initialTab, prevWorkoutId = null, nextWorkoutId = null, backUrl = null, dGroupOptional = true }: WorkoutBuilderProps) {
   const supabase = createClient();
   const [exercises, setExercises] = useState<WorkoutExerciseRow[]>(initialExercises);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -652,7 +653,7 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
                 <tbody>
                   {displayedExercises.map((row, i) => (
                     <Fragment key={row.id}>
-                      {startsOptionalBlock(row.superset_group, displayedExercises[i - 1]?.superset_group ?? null) && (
+                      {dGroupOptional && startsOptionalBlock(row.superset_group, displayedExercises[i - 1]?.superset_group ?? null) && (
                         <OptionalDivider colSpan={5} />
                       )}
                       <tr className="border-b">
@@ -698,7 +699,7 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
                   <tbody>
                     {exercises.map((row, i) => (
                       <Fragment key={row.id}>
-                        {startsOptionalBlock(row.superset_group, exercises[i - 1]?.superset_group ?? null) && (
+                        {dGroupOptional && startsOptionalBlock(row.superset_group, exercises[i - 1]?.superset_group ?? null) && (
                           <OptionalDivider colSpan={13} />
                         )}
                         <ExerciseRow

@@ -32,6 +32,12 @@ export default async function WorkoutPage({ params, searchParams }: Props) {
 
   if (!workout || workout.calendar_id !== id) notFound();
 
+  let dGroupOptional = true;
+  if (calendar?.team_id) {
+    const { data: team } = await supabase.from("teams").select("name").eq("id", calendar.team_id).single();
+    if (team && ["U14", "U13"].includes(team.name)) dGroupOptional = false;
+  }
+
   const workoutList = siblingWorkouts ?? [];
   const currentIdx = workoutList.findIndex((w) => w.id === wid);
   const prevWorkoutId = currentIdx > 0 ? workoutList[currentIdx - 1].id : null;
@@ -187,6 +193,7 @@ export default async function WorkoutPage({ params, searchParams }: Props) {
         prevWorkoutId={prevWorkoutId}
         nextWorkoutId={nextWorkoutId}
         backUrl={backUrl ?? null}
+        dGroupOptional={dGroupOptional}
       />
       {athletes.length > 0 && (
         <div className="border-t pt-6">

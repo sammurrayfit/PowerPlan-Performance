@@ -24,6 +24,17 @@ export default async function AthleteWorkoutPage({ params }: Props) {
 
   if (!workout) notFound();
 
+  let dGroupOptional = true;
+  const { data: workoutCalendar } = await supabase
+    .from("calendars")
+    .select("team_id")
+    .eq("id", workout.calendar_id)
+    .single();
+  if (workoutCalendar?.team_id) {
+    const { data: team } = await supabase.from("teams").select("name").eq("id", workoutCalendar.team_id).single();
+    if (team && ["U14", "U13"].includes(team.name)) dGroupOptional = false;
+  }
+
   // Fetch pre-activation workout from athlete's personal calendar for this date
   const { data: personalCalendars } = await supabase
     .from("calendars")
@@ -252,6 +263,7 @@ export default async function AthleteWorkoutPage({ params }: Props) {
       exercises={combinedExercises}
       athleteId={user.id}
       attendanceId={attendance?.id ?? null}
+      dGroupOptional={dGroupOptional}
     />
   );
 }

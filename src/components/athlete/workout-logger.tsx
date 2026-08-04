@@ -484,6 +484,7 @@ export function WorkoutLogger({
   attendanceId,
   onSaveSet,
   onSaveAttendance,
+  dGroupOptional = true,
 }: {
   workout: Workout;
   exercises: Exercise[];
@@ -491,6 +492,7 @@ export function WorkoutLogger({
   attendanceId?: string | null;
   onSaveSet?: SaveSetFn;
   onSaveAttendance?: (params: { workoutId: string; athleteId: string; rpePost: number }) => Promise<void>;
+  dGroupOptional?: boolean;
 }) {
   const [showRPEPrompt, setShowRPEPrompt] = useState(false);
 
@@ -588,7 +590,7 @@ export function WorkoutLogger({
             )}
             {mainExercises.map((ex, i) => (
               <Fragment key={ex.id}>
-                {startsOptionalBlock(ex.superset_group, mainExercises[i - 1]?.superset_group ?? null) && (
+                {dGroupOptional && startsOptionalBlock(ex.superset_group, mainExercises[i - 1]?.superset_group ?? null) && (
                   <div className="flex items-center gap-2 pt-1">
                     <div className="h-px flex-1 bg-border" />
                     <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Optional</span>
