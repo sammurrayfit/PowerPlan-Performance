@@ -43,17 +43,20 @@ function EditCalendarDialog({
 }: {
   calendar: Calendar;
   teams: Team[];
-  onSaved: (calendarId: string, updates: { team_id?: string | null; color?: string }) => void;
+  onSaved: (calendarId: string, updates: { name?: string; team_id?: string | null; color?: string }) => void;
 }) {
   const supabase = createClient();
   const [open, setOpen] = useState(false);
+  const [selectedName, setSelectedName] = useState(calendar.name);
   const [selectedTeam, setSelectedTeam] = useState(calendar.team_id ?? "");
   const [selectedColor, setSelectedColor] = useState(calendar.color);
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
+    const trimmedName = selectedName.trim();
+    if (!trimmedName) return;
     setSaving(true);
-    const updates = { team_id: selectedTeam || null, color: selectedColor };
+    const updates = { name: trimmedName, team_id: selectedTeam || null, color: selectedColor };
     const { error } = await supabase.from("calendars").update(updates).eq("id", calendar.id);
     if (error) { alert(error.message); setSaving(false); return; }
     onSaved(calendar.id, updates);
@@ -73,9 +76,18 @@ function EditCalendarDialog({
       <Dialog open={open} onOpenChange={(o) => !saving && setOpen(o)}>
         <DialogContent className="sm:max-w-sm" onClick={(e) => e.stopPropagation()}>
           <DialogHeader>
-            <DialogTitle>Edit — {calendar.name}</DialogTitle>
+            <DialogTitle>Edit calendar</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-2">
+            <div className="space-y-1.5">
+              <Label htmlFor={`name-${calendar.id}`}>Name</Label>
+              <Input
+                id={`name-${calendar.id}`}
+                value={selectedName}
+                onChange={(e) => setSelectedName(e.target.value)}
+                required
+              />
+            </div>
             <div className="space-y-1.5">
               <Label>Color</Label>
               <div className="flex gap-2 flex-wrap">
@@ -112,7 +124,7 @@ function EditCalendarDialog({
           </div>
           <DialogFooter className="mt-4">
             <Button variant="outline" onClick={() => setOpen(false)} disabled={saving}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+            <Button onClick={handleSave} disabled={saving || !selectedName.trim()}>{saving ? "Saving…" : "Save"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -254,7 +266,7 @@ export function CalendarList({ calendars: initialCalendars, teams, coachId, athl
     setDeleting(null);
   }
 
-  function handleCalendarUpdated(calendarId: string, updates: { team_id?: string | null; color?: string }) {
+  function handleCalendarUpdated(calendarId: string, updates: { name?: string; team_id?: string | null; color?: string }) {
     setCalendarList((prev) =>
       prev.map((c) => c.id === calendarId ? { ...c, ...updates } : c)
     );
