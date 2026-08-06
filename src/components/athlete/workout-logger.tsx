@@ -72,6 +72,11 @@ interface SetRow {
   rpe: string;
   saved: boolean;
   logId: string | null;
+  // True once the athlete has actually edited this row. reps/load start
+  // pre-filled with the prescribed defaults (see buildInitialRows below) so
+  // the row isn't blank, but that pre-fill must never be saved on its own —
+  // only a real edit should trigger a save on blur.
+  touched: boolean;
 }
 
 function calcWeight(load: number | null, loadType: string | null, max: number | null): number | null {
@@ -138,6 +143,7 @@ function ExerciseCard({
         rpe: existing?.rpe != null ? String(existing.rpe) : "",
         saved: !!existing,
         logId: existing?.id ?? null,
+        touched: false,
       };
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -147,7 +153,7 @@ function ExerciseCard({
   function updateRow(index: number, field: keyof Pick<SetRow, "reps" | "load" | "rpe">, value: string) {
     setRows((prev) => {
       const next = [...prev];
-      next[index] = { ...next[index], [field]: value, saved: false };
+      next[index] = { ...next[index], [field]: value, saved: false, touched: true };
       return next;
     });
   }
@@ -327,7 +333,7 @@ function ExerciseCard({
                   placeholder={effectiveReps || "—"}
                   value={row.reps}
                   onChange={(e) => updateRow(i, "reps", e.target.value)}
-                  onBlur={() => { if (row.reps || row.load || row.rpe) saveSet(i); }}
+                  onBlur={() => { if (row.touched) saveSet(i); }}
                 />
                 <Input
                   className="h-8 text-sm"
@@ -337,7 +343,7 @@ function ExerciseCard({
                   placeholder={suggestedLoad != null ? String(suggestedLoad) : "—"}
                   value={row.load}
                   onChange={(e) => updateRow(i, "load", e.target.value)}
-                  onBlur={() => { if (row.reps || row.load || row.rpe) saveSet(i); }}
+                  onBlur={() => { if (row.touched) saveSet(i); }}
                 />
                 <Input
                   className="h-8 text-sm"
@@ -347,7 +353,7 @@ function ExerciseCard({
                   placeholder="—"
                   value={row.rpe}
                   onChange={(e) => updateRow(i, "rpe", e.target.value)}
-                  onBlur={() => { if (row.reps || row.load || row.rpe) saveSet(i); }}
+                  onBlur={() => { if (row.touched) saveSet(i); }}
                 />
                 {exercise.previousSession && (
                   <span className="text-xs text-primary font-medium whitespace-nowrap px-1">
