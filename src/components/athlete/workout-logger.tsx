@@ -244,9 +244,11 @@ function ExerciseCard({
             )}
             <CardTitle className="text-base">{exercise.exercise_name}</CardTitle>
           </div>
-          <span className="text-xs text-muted-foreground shrink-0">
-            {completedCount}/{effectiveSets} sets
-          </span>
+          {!exercise.is_pre_activation && (
+            <span className="text-xs text-muted-foreground shrink-0">
+              {completedCount}/{effectiveSets} sets
+            </span>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2 mt-1">
@@ -295,6 +297,7 @@ function ExerciseCard({
         </div>
       )}
 
+      {!exercise.is_pre_activation && (
       <CardContent className="px-4 pb-4">
         <div className="space-y-2">
           {/* Column headers */}
@@ -373,6 +376,7 @@ function ExerciseCard({
           )}
         </div>
       </CardContent>
+      )}
     </Card>
   );
 }
