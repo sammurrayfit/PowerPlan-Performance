@@ -327,7 +327,7 @@ function ExerciseCard({
                   placeholder={effectiveReps || "—"}
                   value={row.reps}
                   onChange={(e) => updateRow(i, "reps", e.target.value)}
-                  onBlur={() => { if (row.reps || row.load) saveSet(i); }}
+                  onBlur={() => { if (row.reps || row.load || row.rpe) saveSet(i); }}
                 />
                 <Input
                   className="h-8 text-sm"
@@ -337,17 +337,17 @@ function ExerciseCard({
                   placeholder={suggestedLoad != null ? String(suggestedLoad) : "—"}
                   value={row.load}
                   onChange={(e) => updateRow(i, "load", e.target.value)}
-                  onBlur={() => { if (row.reps || row.load) saveSet(i); }}
+                  onBlur={() => { if (row.reps || row.load || row.rpe) saveSet(i); }}
                 />
                 <Input
                   className="h-8 text-sm"
                   type="number"
-                  min={1}
+                  min={0}
                   max={10}
                   placeholder="—"
                   value={row.rpe}
                   onChange={(e) => updateRow(i, "rpe", e.target.value)}
-                  onBlur={() => { if (row.reps || row.load) saveSet(i); }}
+                  onBlur={() => { if (row.reps || row.load || row.rpe) saveSet(i); }}
                 />
                 {exercise.previousSession && (
                   <span className="text-xs text-primary font-medium whitespace-nowrap px-1">

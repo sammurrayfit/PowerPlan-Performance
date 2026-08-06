@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CalendarDays, Users, Dumbbell, TrendingUp, Trophy, CheckCircle2, Circle } from "lucide-react";
 import { compareWorkoutOrder } from "@/lib/utils";
+import { fetchCompletedWorkouts } from "@/app/(coach)/coach/coaching-tools/reports/actions";
+import { CompletedWorkoutsReport } from "@/components/coach/coaching-tools/reports/completed-workouts-report";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -81,6 +83,14 @@ export default async function CoachDashboard() {
     ];
     return <EmptyDashboard stats={stats} />;
   }
+
+  // ── Today's completion, per athlete ─────────────────────────────────────────
+  const todayRowsRaw = await fetchCompletedWorkouts(effectiveCoachId, "", "all", today);
+  const statusRank = (r: (typeof todayRowsRaw)[number]) =>
+    r.totalExercises > 0 && r.loggedExercises >= r.totalExercises ? 2 : r.loggedExercises > 0 ? 1 : 0;
+  const todayRows = [...todayRowsRaw].sort(
+    (a, b) => statusRank(a) - statusRank(b) || a.athleteName.localeCompare(b.athleteName)
+  );
 
   // ── This week's workouts ────────────────────────────────────────────────────
   const { data: weekWorkoutsRaw } = await supabase
@@ -166,6 +176,25 @@ export default async function CoachDashboard() {
           </Card>
         ))}
       </div>
+
+      {/* ── Today's completion, roster-wide ── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+            Today&apos;s completion
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {todayRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              No workouts scheduled today.
+            </p>
+          ) : (
+            <CompletedWorkoutsReport rows={todayRows} backHref="/coach/dashboard" />
+          )}
+        </CardContent>
+      </Card>
 
       {/* ── Two-column lower section ── */}
       <div className="grid gap-4 md:grid-cols-2">

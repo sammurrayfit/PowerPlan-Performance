@@ -5,6 +5,7 @@ import type { CompletedWorkoutRow } from "@/app/(coach)/coach/coaching-tools/rep
 
 interface Props {
   rows: CompletedWorkoutRow[];
+  backHref?: string;
 }
 
 function StatusBadge({ row }: { row: CompletedWorkoutRow }) {
@@ -36,7 +37,7 @@ function attendanceLabel(status: CompletedWorkoutRow["attendanceStatus"]): strin
   return "—";
 }
 
-export function CompletedWorkoutsReport({ rows }: Props) {
+export function CompletedWorkoutsReport({ rows, backHref = "/coach/coaching-tools/reports" }: Props) {
   if (rows.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-8 text-center">
@@ -74,7 +75,7 @@ export function CompletedWorkoutsReport({ rows }: Props) {
               <td className="px-3 py-2"><StatusBadge row={r} /></td>
               <td className="px-3 py-2">
                 <Link
-                  href={`/coach/calendar/${r.calendarId}/workout/${r.workoutId}?tab=logged&back=${encodeURIComponent("/coach/coaching-tools/reports")}`}
+                  href={`/coach/calendar/${r.calendarId}/workout/${r.workoutId}?tab=logged&back=${encodeURIComponent(backHref)}`}
                   className="text-xs font-medium text-primary hover:underline whitespace-nowrap"
                 >
                   View
