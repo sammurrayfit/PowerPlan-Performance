@@ -148,7 +148,7 @@ export async function fetchAthleteWorkoutData(workoutId: string, athleteId: stri
         .eq("date", workoutRow.date)
         .eq("title", "Pre-Activation")
         .maybeSingle();
-      if (preWorkout) {
+      if (preWorkout && preWorkout.id !== workoutId) {
         const [{ data: preExercises }, { data: preLogs }] = await Promise.all([
           supabase
             .from("workout_exercises")

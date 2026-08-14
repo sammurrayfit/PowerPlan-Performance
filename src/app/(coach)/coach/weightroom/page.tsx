@@ -83,8 +83,16 @@ export default async function WeightroomPage({ searchParams }: Props) {
     workoutIdByAthlete: Record<string, string>;
   }>();
 
+  // A Pre-Activation workout is normally merged into that calendar's other
+  // same-day workout when viewing athlete detail (see fetchAthleteWorkoutData).
+  // Only skip it here if such a companion workout actually exists — otherwise
+  // it's the only thing scheduled that day and needs its own kiosk entry.
+  const calendarIdsWithCompanionWorkout = new Set(
+    (workouts ?? []).filter((w) => w.title !== "Pre-Activation").map((w) => w.calendar_id)
+  );
+
   for (const w of workouts ?? []) {
-    if (w.title === "Pre-Activation") continue;
+    if (w.title === "Pre-Activation" && calendarIdsWithCompanionWorkout.has(w.calendar_id)) continue;
     const athletes = calendarAthletes[w.calendar_id] ?? [];
     if (!groupMap.has(w.title)) {
       groupMap.set(w.title, {
