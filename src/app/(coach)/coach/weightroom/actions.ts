@@ -127,7 +127,7 @@ export async function fetchAthleteWorkoutData(workoutId: string, athleteId: stri
       .select("*")
       .eq("workout_id", workoutId)
       .eq("athlete_id", athleteId),
-    supabase.from("workouts").select("date").eq("id", workoutId).single(),
+    supabase.from("workouts").select("date, title").eq("id", workoutId).single(),
   ]);
 
   // Fetch pre-activation exercises for this athlete on the same date
@@ -297,7 +297,7 @@ export async function fetchAthleteWorkoutData(workoutId: string, athleteId: stri
     rest_seconds: e.rest_seconds,
     notes: e.notes,
     superset_group: e.superset_group ?? null,
-    is_pre_activation: false,
+    is_pre_activation: workoutRow?.title === "Pre-Activation",
     override: overridesMap[e.id] ?? null,
     max: e.exercise_id ? (maxesMap[e.exercise_id] ?? null) : null,
     logs: logsMap[e.id] ?? [],
