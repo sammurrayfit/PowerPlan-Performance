@@ -83,16 +83,21 @@ export default async function WeightroomPage({ searchParams }: Props) {
     workoutIdByAthlete: Record<string, string>;
   }>();
 
-  // A Pre-Activation workout is normally merged into that calendar's other
-  // same-day workout when viewing athlete detail (see fetchAthleteWorkoutData).
-  // Only skip it here if such a companion workout actually exists — otherwise
-  // it's the only thing scheduled that day and needs its own kiosk entry.
-  const calendarIdsWithCompanionWorkout = new Set(
-    (workouts ?? []).filter((w) => w.title !== "Pre-Activation").map((w) => w.calendar_id)
-  );
+  // A Pre-Activation workout is merged into that athlete's other same-day
+  // workout when a session is opened (see fetchAthleteWorkoutData), so an
+  // athlete who also has a lift scheduled today doesn't need a separate
+  // Pre-Activation tile — it'd just be a second, redundant way into the same
+  // exercises. Only athletes with no other workout today keep their own
+  // Pre-Activation entry.
+  const athletesWithCompanionWorkout = new Set<string>();
+  for (const w of workouts ?? []) {
+    if (w.title === "Pre-Activation") continue;
+    for (const athleteId of calendarAthletes[w.calendar_id] ?? []) {
+      athletesWithCompanionWorkout.add(athleteId);
+    }
+  }
 
   for (const w of workouts ?? []) {
-    if (w.title === "Pre-Activation" && calendarIdsWithCompanionWorkout.has(w.calendar_id)) continue;
     const athletes = calendarAthletes[w.calendar_id] ?? [];
     if (!groupMap.has(w.title)) {
       groupMap.set(w.title, {
@@ -106,6 +111,7 @@ export default async function WeightroomPage({ searchParams }: Props) {
     }
     const group = groupMap.get(w.title)!;
     for (const athleteId of athletes) {
+      if (w.title === "Pre-Activation" && athletesWithCompanionWorkout.has(athleteId)) continue;
       if (!group.athleteIds.includes(athleteId)) {
         group.athleteIds.push(athleteId);
         group.workoutIdByAthlete[athleteId] = w.id;
@@ -113,7 +119,7 @@ export default async function WeightroomPage({ searchParams }: Props) {
     }
   }
 
-  const mergedWorkouts = Array.from(groupMap.values());
+  const mergedWorkouts = Array.from(groupMap.values()).filter((g) => g.athleteIds.length > 0);
   const profiles = (allProfiles ?? []) as { id: string; full_name: string }[];
 
   return (
