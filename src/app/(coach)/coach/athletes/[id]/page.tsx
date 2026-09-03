@@ -143,13 +143,7 @@ export default async function AthleteProfilePage({ params, searchParams }: Props
               </p>
             </div>
           </div>
-          <AthleteSettings
-            athleteId={id}
-            allCalendars={(allCalendars ?? []).map((c) => ({
-              id: c.id, name: c.name, color: c.color,
-              assignedToThisAthlete: c.athlete_id === id,
-            }))}
-          />
+          <AthleteSettings athleteId={id} currentName={athlete.full_name} />
         </div>
       </div>
 

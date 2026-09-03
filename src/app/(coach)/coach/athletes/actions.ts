@@ -179,6 +179,31 @@ export async function assignCalendarToAthlete(calendarId: string, athleteId: str
   await supabase.from("calendars").update({ athlete_id: athleteId }).eq("id", calendarId);
 }
 
+export async function updateAthleteName(athleteId: string, fullName: string) {
+  const trimmed = fullName.trim();
+  if (!trimmed) throw new Error("Name is required");
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
+
+  // Verify this athlete belongs to one of this coach's teams before editing.
+  const { data: teams } = await supabase.from("teams").select("id").eq("coach_id", effectiveCoachId);
+  const teamIds = (teams ?? []).map((t) => t.id);
+  const { data: membership } = teamIds.length > 0
+    ? await supabase.from("team_memberships").select("athlete_id").eq("athlete_id", athleteId).in("team_id", teamIds).maybeSingle()
+    : { data: null };
+  if (!membership) throw new Error("Not authorized");
+
+  const admin = adminClient();
+  const { error } = await admin.from("profiles").update({ full_name: trimmed }).eq("id", athleteId);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/coach/athletes");
+  revalidatePath(`/coach/athletes/${athleteId}`);
+}
+
 export async function goToAthleteProfile(athleteId: string) {
   redirect(`/coach/athletes/${athleteId}`);
 }
