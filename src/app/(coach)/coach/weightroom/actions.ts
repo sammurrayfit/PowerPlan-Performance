@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEffectiveCoachId } from "@/lib/supabase/coach";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { autoRecordPR, epley1RM } from "@/lib/pr";
 
 function adminClient() {
   return createAdminClient(
@@ -32,13 +33,14 @@ export async function saveKioskSet(params: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: wo } = await supabase
     .from("workouts")
-    .select("calendars(coach_id)")
+    .select("date, calendars(coach_id)")
     .eq("id", params.workoutId)
     .single();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if ((wo as any)?.calendars?.coach_id !== effectiveCoachId) throw new Error("Not authorized");
 
   const admin = adminClient();
+  let result: { id: string };
   if (params.existingLogId) {
     const { error } = await admin
       .from("exercise_logs")
@@ -49,7 +51,7 @@ export async function saveKioskSet(params: {
       })
       .eq("id", params.existingLogId);
     if (error) throw new Error(error.message);
-    return { id: params.existingLogId };
+    result = { id: params.existingLogId };
   } else {
     const { data, error } = await admin
       .from("exercise_logs")
@@ -65,8 +67,30 @@ export async function saveKioskSet(params: {
       .select("id")
       .single();
     if (error) throw new Error(error.message);
-    return data;
+    result = data;
   }
+
+  // A completed set (reps + load both logged) is a PR candidate — check its
+  // Epley-estimated 1RM against the athlete's best on file for this exercise.
+  // The set itself already saved above, so a failure here shouldn't fail the
+  // whole action and surface as a false "failed to save set" to the coach.
+  try {
+    if (params.repsCompleted != null && params.loadCompleted != null && wo?.date) {
+      const { data: we } = await admin
+        .from("workout_exercises")
+        .select("exercise_id")
+        .eq("id", params.workoutExerciseId)
+        .single();
+      if (we?.exercise_id) {
+        const estimate = epley1RM(params.loadCompleted, params.repsCompleted);
+        await autoRecordPR(admin, params.athleteId, we.exercise_id, estimate, "lbs", wo.date);
+      }
+    }
+  } catch {
+    // ignore — PR tracking is best-effort
+  }
+
+  return result;
 }
 
 export type PreviousSet = {

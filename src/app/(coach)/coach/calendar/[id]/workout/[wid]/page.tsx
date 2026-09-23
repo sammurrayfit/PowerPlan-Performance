@@ -33,8 +33,17 @@ export default async function WorkoutPage({ params, searchParams }: Props) {
   if (!workout || workout.calendar_id !== id) notFound();
 
   let dGroupOptional = true;
-  if (calendar?.team_id) {
-    const { data: team } = await supabase.from("teams").select("name").eq("id", calendar.team_id).single();
+  let workoutTeamId = calendar?.team_id ?? null;
+  if (!workoutTeamId && calendar?.athlete_id) {
+    const { data: membership } = await supabase
+      .from("team_memberships")
+      .select("team_id")
+      .eq("athlete_id", calendar.athlete_id)
+      .maybeSingle();
+    workoutTeamId = membership?.team_id ?? null;
+  }
+  if (workoutTeamId) {
+    const { data: team } = await supabase.from("teams").select("name").eq("id", workoutTeamId).single();
     if (team && ["U14", "U13"].includes(team.name)) dGroupOptional = false;
   }
 

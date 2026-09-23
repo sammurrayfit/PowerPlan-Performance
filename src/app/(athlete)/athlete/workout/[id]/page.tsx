@@ -27,11 +27,20 @@ export default async function AthleteWorkoutPage({ params }: Props) {
   let dGroupOptional = true;
   const { data: workoutCalendar } = await supabase
     .from("calendars")
-    .select("team_id")
+    .select("team_id, athlete_id")
     .eq("id", workout.calendar_id)
     .single();
-  if (workoutCalendar?.team_id) {
-    const { data: team } = await supabase.from("teams").select("name").eq("id", workoutCalendar.team_id).single();
+  let workoutTeamId = workoutCalendar?.team_id ?? null;
+  if (!workoutTeamId && workoutCalendar?.athlete_id) {
+    const { data: membership } = await supabase
+      .from("team_memberships")
+      .select("team_id")
+      .eq("athlete_id", workoutCalendar.athlete_id)
+      .maybeSingle();
+    workoutTeamId = membership?.team_id ?? null;
+  }
+  if (workoutTeamId) {
+    const { data: team } = await supabase.from("teams").select("name").eq("id", workoutTeamId).single();
     if (team && ["U14", "U13"].includes(team.name)) dGroupOptional = false;
   }
 

@@ -178,6 +178,93 @@ export async function deleteOverride(workoutExerciseId: string, athleteId: strin
     .eq("athlete_id", athleteId);
 }
 
+interface SwapMatchParams {
+  calendarId: string;
+  fromExerciseId: string;
+  startDate: string;
+  endDate?: string | null;
+  daysOfWeek?: number[];
+}
+
+interface SwapMatch {
+  workoutExerciseId: string;
+  workoutId: string;
+  date: string;
+  title: string;
+}
+
+// Shared by preview and apply so the two can never disagree about which
+// workouts match — apply always re-derives matches server-side rather than
+// trusting a client-supplied list of ids.
+async function resolveSwapMatches(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  coachId: string,
+  { calendarId, fromExerciseId, startDate, endDate, daysOfWeek }: SwapMatchParams
+): Promise<SwapMatch[]> {
+  const { data: calendar } = await supabase.from("calendars").select("coach_id").eq("id", calendarId).single();
+  if (!calendar || calendar.coach_id !== coachId) throw new Error("Not authorized");
+
+  let workoutQuery = supabase
+    .from("workouts")
+    .select("id, date, title")
+    .eq("calendar_id", calendarId)
+    .gte("date", startDate);
+  if (endDate) workoutQuery = workoutQuery.lte("date", endDate);
+  const { data: workouts } = await workoutQuery;
+
+  const dayFilter = daysOfWeek && daysOfWeek.length > 0 ? new Set(daysOfWeek) : null;
+  const matchingWorkouts = (workouts ?? []).filter((w) => {
+    if (!dayFilter) return true;
+    return dayFilter.has(new Date(w.date + "T00:00:00Z").getUTCDay());
+  });
+  if (matchingWorkouts.length === 0) return [];
+
+  const workoutIds = matchingWorkouts.map((w) => w.id);
+  const { data: rows } = await supabase
+    .from("workout_exercises")
+    .select("id, workout_id")
+    .in("workout_id", workoutIds)
+    .eq("exercise_id", fromExerciseId);
+
+  const workoutById = Object.fromEntries(matchingWorkouts.map((w) => [w.id, w]));
+  return (rows ?? [])
+    .map((r) => {
+      const w = workoutById[r.workout_id];
+      return w ? { workoutExerciseId: r.id, workoutId: r.workout_id, date: w.date, title: w.title } : null;
+    })
+    .filter((r): r is SwapMatch => r !== null)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export async function previewExerciseSwap(params: SwapMatchParams): Promise<{ matches: SwapMatch[] }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
+  const matches = await resolveSwapMatches(supabase, effectiveCoachId, params);
+  return { matches };
+}
+
+export async function applyExerciseSwap(
+  params: SwapMatchParams & { toExerciseId: string }
+): Promise<{ updatedCount: number }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
+  const matches = await resolveSwapMatches(supabase, effectiveCoachId, params);
+  if (matches.length === 0) return { updatedCount: 0 };
+
+  const { error } = await supabase
+    .from("workout_exercises")
+    .update({ exercise_id: params.toExerciseId })
+    .in("id", matches.map((m) => m.workoutExerciseId));
+  if (error) throw new Error(error.message);
+
+  revalidatePath(`/coach/calendar/${params.calendarId}`);
+  return { updatedCount: matches.length };
+}
+
 export async function upsertAttendance(
   workoutId: string,
   athleteId: string,

@@ -10,10 +10,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ChevronLeft, ChevronRight, Lock, Plus } from "lucide-react";
 import { createWorkout } from "@/app/(coach)/coach/calendar/actions";
+import { BulkExerciseSwap } from "./bulk-exercise-swap";
 import type { Database } from "@/lib/supabase/types";
 
 type Calendar = Database["public"]["Tables"]["calendars"]["Row"];
 type Workout = Pick<Database["public"]["Tables"]["workouts"]["Row"], "id" | "date" | "title" | "is_locked">;
+type PickerExercise = { id: string; name: string; muscle_groups: string[] };
 
 const DAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -23,6 +25,8 @@ interface MonthViewProps {
   workouts: Workout[];
   year: number;
   month: number;
+  usedExercises: PickerExercise[];
+  allExercises: PickerExercise[];
 }
 
 function getMonthParam(year: number, month: number) {
@@ -41,7 +45,7 @@ function toDateStr(year: number, month: number, day: number) {
   return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-export function MonthView({ calendar, workouts, year, month }: MonthViewProps) {
+export function MonthView({ calendar, workouts, year, month, usedExercises, allExercises }: MonthViewProps) {
   const router = useRouter();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>("");
@@ -78,15 +82,18 @@ export function MonthView({ calendar, workouts, year, month }: MonthViewProps) {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <Link href={`/coach/calendar`} className="text-sm text-muted-foreground hover:text-foreground">
-          ← Calendars
-        </Link>
-        <div
-          className="h-3 w-3 rounded-full flex-shrink-0"
-          style={{ backgroundColor: calendar.color }}
-        />
-        <h1 className="font-semibold text-lg">{calendar.name}</h1>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <Link href={`/coach/calendar`} className="text-sm text-muted-foreground hover:text-foreground">
+            ← Calendars
+          </Link>
+          <div
+            className="h-3 w-3 rounded-full flex-shrink-0"
+            style={{ backgroundColor: calendar.color }}
+          />
+          <h1 className="font-semibold text-lg">{calendar.name}</h1>
+        </div>
+        <BulkExerciseSwap calendarId={calendar.id} usedExercises={usedExercises} allExercises={allExercises} />
       </div>
 
       {/* Month navigation */}
@@ -110,11 +117,11 @@ export function MonthView({ calendar, workouts, year, month }: MonthViewProps) {
       </div>
 
       {/* Calendar grid */}
-      <div className="rounded-lg border overflow-hidden">
+      <div className="rounded-lg border overflow-hidden shadow-sm">
         {/* Day headers */}
         <div className="grid grid-cols-7 border-b bg-muted/50">
           {DAY_HEADERS.map((d) => (
-            <div key={d} className="py-2 text-center text-xs font-medium text-muted-foreground">
+            <div key={d} className="py-2.5 text-center text-xs font-semibold text-muted-foreground tracking-wide">
               {d}
             </div>
           ))}
@@ -130,23 +137,28 @@ export function MonthView({ calendar, workouts, year, month }: MonthViewProps) {
             return (
               <div
                 key={idx}
-                className={`min-h-[100px] border-b border-r p-1.5 last:border-r-0 ${
+                className={`min-h-[112px] border-b border-r p-1.5 last:border-r-0 transition-colors ${
                   day ? "hover:bg-muted/30 cursor-pointer" : "bg-muted/10"
-                } ${isToday ? "bg-blue-50 dark:bg-blue-950/20" : ""}`}
+                } ${isToday ? "bg-primary/5 ring-1 ring-inset ring-primary/20" : ""}`}
                 onClick={() => day && openCreate(day)}
               >
                 {day && (
                   <>
-                    <span
-                      className={`text-xs font-medium inline-flex h-6 w-6 items-center justify-center rounded-full ${
-                        isToday
-                          ? "text-white"
-                          : "text-foreground"
-                      }`}
-                      style={isToday ? { backgroundColor: calendar.color } : undefined}
-                    >
-                      {day}
-                    </span>
+                    <div className="flex items-center justify-between">
+                      <span
+                        className={`text-xs font-semibold inline-flex h-6 w-6 items-center justify-center rounded-full ${
+                          isToday ? "text-white" : "text-foreground"
+                        }`}
+                        style={isToday ? { backgroundColor: calendar.color } : undefined}
+                      >
+                        {day}
+                      </span>
+                      {dayWorkouts.length > 1 && (
+                        <span className="text-[10px] font-medium text-muted-foreground bg-muted rounded-full px-1.5 py-0.5">
+                          {dayWorkouts.length}
+                        </span>
+                      )}
+                    </div>
 
                     <div className="mt-1 space-y-0.5">
                       {dayWorkouts.map((w) => (
@@ -156,7 +168,7 @@ export function MonthView({ calendar, workouts, year, month }: MonthViewProps) {
                             e.stopPropagation();
                             router.push(`/coach/calendar/${calendar.id}/workout/${w.id}`);
                           }}
-                          className="w-full text-left text-xs px-1.5 py-0.5 rounded truncate flex items-center gap-1 hover:opacity-80 transition-opacity text-white"
+                          className="w-full text-left text-xs px-1.5 py-0.5 rounded truncate flex items-center gap-1 hover:opacity-85 hover:shadow-sm transition-all text-white"
                           style={{ backgroundColor: calendar.color }}
                         >
                           {w.is_locked && <Lock className="h-2.5 w-2.5 flex-shrink-0" />}

@@ -1,8 +1,9 @@
 "use client";
 
-import { Fragment, useState, useCallback } from "react";
+import { Fragment, useState, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { autoRecordPR, epley1RM } from "@/lib/pr";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -92,11 +93,15 @@ function defaultLoad(load: number | null, loadType: string | null, calcLbs: numb
   return null;
 }
 
-// The reps to pre-fill into an unlogged set: the leading number in the
+// The reps to pre-fill into an unlogged set. A comma-separated prescription
+// ("6,5,5,4") gives a different target per set, so pick the entry matching
+// this set's index; otherwise fall back to the leading number in the
 // prescription ("8" -> 8, "6 each" -> 6), or none for non-numeric
 // prescriptions ("AMRAP") where a default would be misleading.
-function defaultReps(prescribedReps: string): string {
-  const n = parseInt(prescribedReps, 10);
+function defaultReps(prescribedReps: string, setIndex: number): string {
+  const parts = prescribedReps.split(",").map((p) => p.trim());
+  const target = parts.length > 1 ? (parts[setIndex] ?? parts[parts.length - 1]) : prescribedReps;
+  const n = parseInt(target, 10);
   return Number.isNaN(n) ? "" : String(n);
 }
 
@@ -118,12 +123,16 @@ function ExerciseCard({
   exercise,
   athleteId,
   workoutId,
+  workoutDate,
   onSaveSet,
+  onProgress,
 }: {
   exercise: Exercise;
   athleteId: string;
   workoutId: string;
+  workoutDate: string;
   onSaveSet?: SaveSetFn;
+  onProgress?: (exerciseId: string, completed: number) => void;
 }) {
   const supabase = createClient();
 
@@ -138,7 +147,7 @@ function ExerciseCard({
     return Array.from({ length: effectiveSets }, (_, i) => {
       const existing = exercise.logs.find((l) => l.set_number === i + 1);
       return {
-        reps: existing?.reps_completed != null ? String(existing.reps_completed) : defaultReps(effectiveReps),
+        reps: existing?.reps_completed != null ? String(existing.reps_completed) : defaultReps(effectiveReps, i),
         load: existing?.load_completed != null ? String(existing.load_completed) : suggestedLoad != null ? String(suggestedLoad) : "",
         rpe: existing?.rpe != null ? String(existing.rpe) : "",
         saved: !!existing,
@@ -194,6 +203,7 @@ function ExerciseCard({
           next[index] = { ...next[index], saved: true };
           return next;
         });
+        await maybeRecordPR(repsNum, loadNum);
       } else {
         const { data, error } = await supabase
           .from("exercise_logs")
@@ -214,9 +224,25 @@ function ExerciseCard({
           next[index] = { ...next[index], saved: true, logId: data?.id ?? null };
           return next;
         });
+        await maybeRecordPR(repsNum, loadNum);
       }
     } catch {
       toast.error("Failed to save set");
+    }
+  }
+
+  // A completed set (reps + load both logged) is a PR candidate — check its
+  // Epley-estimated 1RM against the athlete's best on file for this exercise.
+  // Only reachable on the athlete-authenticated path; the coach kiosk path
+  // (onSaveSet) records PRs server-side in saveKioskSet instead.
+  async function maybeRecordPR(reps: number | null, load: number | null) {
+    if (reps == null || load == null) return;
+    try {
+      const estimate = epley1RM(load, reps);
+      await autoRecordPR(supabase, athleteId, exercise.exercise_id, estimate, "lbs", workoutDate);
+    } catch {
+      // The set itself already saved successfully — don't surface a PR-check
+      // failure as a save error.
     }
   }
 
@@ -232,8 +258,20 @@ function ExerciseCard({
   const [demoOpen, setDemoOpen] = useState(false);
   const hasDemo = !!(exercise.video_url || exercise.image_url);
 
+  useEffect(() => {
+    onProgress?.(exercise.id, completedCount);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [completedCount, exercise.id]);
+
+  const supersetBorderColor = exercise.superset_group && !exercise.is_pre_activation
+    ? supersetColor(exercise.superset_group)
+    : undefined;
+
   return (
-    <Card className="overflow-hidden">
+    <Card
+      className="overflow-hidden border-l-4"
+      style={{ borderLeftColor: supersetBorderColor ?? "transparent" }}
+    >
       <CardHeader className="pb-2 pt-4 px-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 flex-wrap">
@@ -251,7 +289,13 @@ function ExerciseCard({
             <CardTitle className="text-base">{exercise.exercise_name}</CardTitle>
           </div>
           {!exercise.is_pre_activation && (
-            <span className="text-xs text-muted-foreground shrink-0">
+            <span
+              className={`text-xs font-medium shrink-0 px-2 py-0.5 rounded-full ${
+                completedCount === effectiveSets && effectiveSets > 0
+                  ? "bg-green-500/15 text-green-600 dark:text-green-400"
+                  : "text-muted-foreground"
+              }`}
+            >
               {completedCount}/{effectiveSets} sets
             </span>
           )}
@@ -307,7 +351,7 @@ function ExerciseCard({
       <CardContent className="px-4 pb-4">
         <div className="space-y-2">
           {/* Column headers */}
-          <div className={`grid gap-1 text-xs text-muted-foreground px-1 ${exercise.previousSession ? "grid-cols-[2rem_1fr_1fr_1fr_auto_2rem]" : "grid-cols-[2rem_1fr_1fr_1fr_2rem]"}`}>
+          <div className={`grid gap-1 text-xs text-muted-foreground px-1 ${exercise.previousSession ? "grid-cols-[2rem_1fr_1fr_1fr_auto_2.25rem]" : "grid-cols-[2rem_1fr_1fr_1fr_2.25rem]"}`}>
             <span>Set</span>
             <span>Reps</span>
             <span>Load (lbs)</span>
@@ -324,19 +368,24 @@ function ExerciseCard({
               : null;
 
             return (
-              <div key={i} className={`grid gap-1 items-center ${exercise.previousSession ? "grid-cols-[2rem_1fr_1fr_1fr_auto_2rem]" : "grid-cols-[2rem_1fr_1fr_1fr_2rem]"}`}>
+              <div
+                key={i}
+                className={`grid gap-1 items-center rounded-md -mx-1 px-1 py-0.5 transition-colors ${exercise.previousSession ? "grid-cols-[2rem_1fr_1fr_1fr_auto_2.25rem]" : "grid-cols-[2rem_1fr_1fr_1fr_2.25rem]"} ${
+                  row.saved ? "bg-green-500/[0.06]" : ""
+                }`}
+              >
                 <span className="text-sm text-muted-foreground text-center">{i + 1}</span>
                 <Input
-                  className="h-8 text-sm"
+                  className="h-10 text-sm"
                   type="number"
                   min={0}
-                  placeholder={effectiveReps || "—"}
+                  placeholder={defaultReps(effectiveReps, i) || effectiveReps || "—"}
                   value={row.reps}
                   onChange={(e) => updateRow(i, "reps", e.target.value)}
                   onBlur={() => { if (row.touched) saveSet(i); }}
                 />
                 <Input
-                  className="h-8 text-sm"
+                  className="h-10 text-sm"
                   type="number"
                   min={0}
                   step={0.5}
@@ -346,7 +395,7 @@ function ExerciseCard({
                   onBlur={() => { if (row.touched) saveSet(i); }}
                 />
                 <Input
-                  className="h-8 text-sm"
+                  className="h-10 text-sm"
                   type="number"
                   min={0}
                   max={10}
@@ -362,13 +411,17 @@ function ExerciseCard({
                 )}
                 <button
                   onClick={() => saveSet(i)}
-                  className="flex items-center justify-center text-muted-foreground hover:text-green-500 transition-colors"
+                  className={`flex items-center justify-center h-10 w-9 rounded-md transition-colors ${
+                    row.saved
+                      ? "text-green-500 bg-green-500/10 hover:bg-green-500/15"
+                      : "text-muted-foreground hover:text-green-500 hover:bg-muted"
+                  }`}
                   title="Mark saved"
                 >
                   {row.saved ? (
-                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    <CheckCircle2 className="w-5 h-5" />
                   ) : (
-                    <Circle className="w-4 h-4" />
+                    <Circle className="w-5 h-5" />
                   )}
                 </button>
               </div>
@@ -505,11 +558,18 @@ export function WorkoutLogger({
   dGroupOptional?: boolean;
 }) {
   const [showRPEPrompt, setShowRPEPrompt] = useState(false);
+  const [progressMap, setProgressMap] = useState<Record<string, number>>({});
+
+  const handleProgress = useCallback((exerciseId: string, completed: number) => {
+    setProgressMap((prev) => (prev[exerciseId] === completed ? prev : { ...prev, [exerciseId]: completed }));
+  }, []);
 
   const preActivationExercises = exercises.filter((e) => e.is_pre_activation);
   const mainExercises = exercises.filter((e) => !e.is_pre_activation);
   const hasPreActivation = preActivationExercises.length > 0;
   const totalSets = mainExercises.reduce((sum, e) => sum + (e.override?.sets ?? e.sets ?? 1), 0);
+  const completedSets = mainExercises.reduce((sum, e) => sum + (progressMap[e.id] ?? 0), 0);
+  const progressPct = totalSets > 0 ? Math.round((completedSets / totalSets) * 100) : 0;
 
   return (
     <div className="space-y-4">
@@ -549,11 +609,27 @@ export function WorkoutLogger({
           })}
         </p>
         {workout.notes && <p className="text-sm mt-1">{workout.notes}</p>}
-        <p className="text-xs text-muted-foreground mt-1">
-          {mainExercises.length} exercise{mainExercises.length !== 1 ? "s" : ""} · {totalSets} total sets
-          {hasPreActivation && ` · ${preActivationExercises.length} activation`}
-        </p>
       </div>
+
+      {!showRPEPrompt && totalSets > 0 && (
+        <div className="sticky top-14 z-10 -mx-4 px-4 py-2 bg-background/95 backdrop-blur border-b">
+          <div className="flex items-center justify-between text-xs mb-1">
+            <span className="font-medium text-muted-foreground">
+              {mainExercises.length} exercise{mainExercises.length !== 1 ? "s" : ""}
+              {hasPreActivation && ` · ${preActivationExercises.length} activation`}
+            </span>
+            <span className={`font-semibold ${progressPct === 100 ? "text-green-600 dark:text-green-400" : "text-foreground"}`}>
+              {completedSets}/{totalSets} sets
+            </span>
+          </div>
+          <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${progressPct === 100 ? "bg-green-500" : "bg-primary"}`}
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Always keep ExerciseCards mounted to preserve set state */}
       <div className={showRPEPrompt ? "hidden" : ""}>
@@ -581,6 +657,7 @@ export function WorkoutLogger({
                     exercise={ex}
                     athleteId={athleteId}
                     workoutId={workout.id}
+                    workoutDate={workout.date}
                     onSaveSet={onSaveSet}
                   />
                 ))}
@@ -611,7 +688,9 @@ export function WorkoutLogger({
                   exercise={ex}
                   athleteId={athleteId}
                   workoutId={workout.id}
+                  workoutDate={workout.date}
                   onSaveSet={onSaveSet}
+                  onProgress={handleProgress}
                 />
               </Fragment>
             ))}

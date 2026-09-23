@@ -5,6 +5,16 @@ import { MonthView } from "@/components/coach/calendar/month-view";
 import { ProgramImport } from "@/components/coach/calendar/program-import";
 import { compareWorkoutOrder } from "@/lib/utils";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function dedupeExercises(rows: any[]): { id: string; name: string; muscle_groups: string[] }[] {
+  const seen = new Map<string, { id: string; name: string; muscle_groups: string[] }>();
+  for (const row of rows) {
+    const ex = row.exercises;
+    if (ex && !seen.has(ex.id)) seen.set(ex.id, { id: ex.id, name: ex.name, muscle_groups: ex.muscle_groups ?? [] });
+  }
+  return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 interface Props {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ month?: string }>;
@@ -67,6 +77,21 @@ export default async function CalendarPage({ params, searchParams }: Props) {
     }
   }
 
+  // All workout ids for this calendar (not just the visible month) so the
+  // "Replace" dropdown always reflects the exercises actually programmed.
+  const { data: allCalendarWorkouts } = await supabase.from("workouts").select("id").eq("calendar_id", id);
+  const allWorkoutIds = (allCalendarWorkouts ?? []).map((w) => w.id);
+
+  const [{ data: usedRows }, { data: allExercisesRaw }] = await Promise.all([
+    allWorkoutIds.length > 0
+      ? supabase.from("workout_exercises").select("exercises(id, name, muscle_groups)").in("workout_id", allWorkoutIds)
+      : Promise.resolve({ data: [] }),
+    supabase.from("exercises").select("id, name, category_id, muscle_groups").order("name"),
+  ]);
+
+  const usedExercises = dedupeExercises(usedRows ?? []);
+  const allExercises = (allExercisesRaw ?? []).map((e) => ({ id: e.id, name: e.name, muscle_groups: e.muscle_groups ?? [] }));
+
   return (
     <div className="space-y-6">
       <MonthView
@@ -74,6 +99,8 @@ export default async function CalendarPage({ params, searchParams }: Props) {
         workouts={sortedWorkouts}
         year={year}
         month={monthIndex}
+        usedExercises={usedExercises}
+        allExercises={allExercises}
       />
       <ProgramImport calendarId={id} athletes={athletes} effectiveCoachId={effectiveCoachId!} />
     </div>

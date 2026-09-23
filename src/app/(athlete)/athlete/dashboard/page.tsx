@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Dumbbell, ChevronRight, PartyPopper } from "lucide-react";
 import type { Database } from "@/lib/supabase/types";
 
 type WorkoutRow = Database["public"]["Tables"]["workouts"]["Row"];
@@ -13,6 +14,9 @@ export default async function AthleteDashboard() {
   if (!user) return null;
 
   const today = new Date().toISOString().split("T")[0];
+
+  const { data: profile } = await supabase.from("profiles").select("full_name").eq("id", user.id).single();
+  const firstName = profile?.full_name?.split(" ")[0] ?? "";
 
   const { data: memberships } = await supabase
     .from("team_memberships")
@@ -46,7 +50,9 @@ export default async function AthleteDashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold">Today</h1>
+        <h1 className="text-2xl font-bold">
+          {firstName ? `Hey, ${firstName}` : "Today"}
+        </h1>
         <p className="text-sm text-muted-foreground">
           {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
         </p>
@@ -54,31 +60,52 @@ export default async function AthleteDashboard() {
 
       {todayWorkouts.length > 0 ? (
         <div className="space-y-3">
-          {todayWorkouts.map((workout) => (
-            <Link key={workout.id} href={`/athlete/workout/${workout.id}`}>
-              <Card className="cursor-pointer hover:bg-accent/50 transition-colors">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">{workout.title}</CardTitle>
-                    {workout.is_locked && <Badge variant="secondary">Locked</Badge>}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {calendarMap[workout.calendar_id]?.name}
-                  </p>
-                </CardHeader>
-                {workout.notes && (
-                  <CardContent className="pt-0">
-                    <p className="text-sm text-muted-foreground">{workout.notes}</p>
-                  </CardContent>
-                )}
-              </Card>
-            </Link>
-          ))}
+          {todayWorkouts.map((workout) => {
+            const color = calendarMap[workout.calendar_id]?.color ?? "var(--primary)";
+            return (
+              <Link key={workout.id} href={`/athlete/workout/${workout.id}`}>
+                <Card
+                  className="cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all border-l-4"
+                  style={{ borderLeftColor: color }}
+                >
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white"
+                          style={{ backgroundColor: color }}
+                        >
+                          <Dumbbell className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <CardTitle className="text-base truncate">{workout.title}</CardTitle>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {calendarMap[workout.calendar_id]?.name}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {workout.is_locked && <Badge variant="secondary">Locked</Badge>}
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                    </div>
+                  </CardHeader>
+                  {workout.notes && (
+                    <CardContent className="pt-0">
+                      <p className="text-sm text-muted-foreground">{workout.notes}</p>
+                    </CardContent>
+                  )}
+                </Card>
+              </Link>
+            );
+          })}
         </div>
       ) : (
-        <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">
-            <p>No workouts scheduled for today.</p>
+        <Card className="border-dashed">
+          <CardContent className="py-10 text-center text-muted-foreground flex flex-col items-center gap-2">
+            <PartyPopper className="h-6 w-6 text-primary/60" />
+            <p className="font-medium text-foreground">Nothing scheduled today</p>
+            <p className="text-sm">Enjoy the rest day, or check the calendar for what&apos;s next.</p>
           </CardContent>
         </Card>
       )}
