@@ -46,6 +46,8 @@ export default async function WorkoutPage({ params, searchParams }: Props) {
     const { data: team } = await supabase.from("teams").select("name").eq("id", workoutTeamId).single();
     if (team && ["U14", "U13"].includes(team.name)) dGroupOptional = false;
   }
+  // Pre-Activation uses D1 for core, not an optional block.
+  if (workout.title === "Pre-Activation") dGroupOptional = false;
 
   const workoutList = siblingWorkouts ?? [];
   const currentIdx = workoutList.findIndex((w) => w.id === wid);

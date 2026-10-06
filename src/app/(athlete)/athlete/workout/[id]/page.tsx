@@ -43,6 +43,8 @@ export default async function AthleteWorkoutPage({ params }: Props) {
     const { data: team } = await supabase.from("teams").select("name").eq("id", workoutTeamId).single();
     if (team && ["U14", "U13"].includes(team.name)) dGroupOptional = false;
   }
+  // Pre-Activation uses D1 for core, not an optional block.
+  if (workout.title === "Pre-Activation") dGroupOptional = false;
 
   // Fetch pre-activation workout from athlete's personal calendar for this date
   const { data: personalCalendars } = await supabase
