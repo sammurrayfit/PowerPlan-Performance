@@ -5,6 +5,7 @@ import { AthleteRoster } from "@/components/coach/athletes/athlete-roster";
 import { Leaderboard } from "@/components/coach/athletes/leaderboard";
 import { AthletesPageTabs } from "@/components/coach/athletes/athletes-page-tabs";
 import { MaxesImport, MaxesImportHint } from "@/components/coach/athletes/maxes-import";
+import { WorkoutExport } from "@/components/coach/athletes/workout-export";
 
 export default async function AthletesPage() {
   const supabase = await createClient();
@@ -90,7 +91,10 @@ export default async function AthletesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Athletes</h1>
-        <MaxesImport />
+        <div className="flex items-center gap-2">
+          <WorkoutExport teams={teamsWithAthletes} />
+          <MaxesImport />
+        </div>
       </div>
       <AthletesPageTabs
         roster={<AthleteRoster teams={teamsWithAthletes} />}

@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, BarChart3, Gauge, Heart, Users } from "lucide-react";
+import { Activity, BarChart3, Download, Gauge, Heart, Users } from "lucide-react";
 
 const TABS = [
   { href: "/coach/coaching-tools",           label: "Live Monitor", icon: Activity },
   { href: "/coach/coaching-tools/rpe",       label: "RPE",          icon: Gauge },
   { href: "/coach/coaching-tools/reports",   label: "Reports",      icon: BarChart3 },
+  { href: "/coach/coaching-tools/export",    label: "Export",       icon: Download },
   { href: "/coach/coaching-tools/wellness",  label: "Wellness",     icon: Heart },
   { href: "/coach/coaching-tools/coaches",   label: "Coaches",      icon: Users },
 ];
