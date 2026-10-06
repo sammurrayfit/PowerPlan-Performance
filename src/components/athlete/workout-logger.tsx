@@ -302,7 +302,15 @@ function ExerciseCard({
         </div>
 
         <div className="flex flex-wrap gap-2 mt-1">
-          {effectiveReps && <Badge variant="outline">{effectiveReps} reps</Badge>}
+          {exercise.is_pre_activation ? (
+            // Pre-Activation cards have no set rows or set counter, so the
+            // prescription itself has to carry the set count.
+            <Badge variant="outline">
+              {effectiveReps ? `${effectiveSets} × ${effectiveReps}` : `${effectiveSets} ${effectiveSets === 1 ? "set" : "sets"}`}
+            </Badge>
+          ) : (
+            effectiveReps && <Badge variant="outline">{effectiveReps} reps</Badge>
+          )}
           {loadLabel && <Badge variant="outline">{loadLabel}</Badge>}
           {exercise.tempo && <Badge variant="outline">Tempo: {exercise.tempo}</Badge>}
           {exercise.rest_seconds && <Badge variant="outline">Rest: {exercise.rest_seconds}s</Badge>}
