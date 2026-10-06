@@ -42,6 +42,14 @@ function parseLoadType(raw) {
   if (v.includes('bw') || v.includes('body')) return 'bodyweight';
   return 'absolute';
 }
+// A range like "3-4" means up to 4 sets; Number("3-4") is NaN, which used to
+// store sets as null and show as 1 set in the app.
+function parseSets(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  const range = s.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+  return range ? Number(range[2]) : Number(s) || null;
+}
 function toDateStr(raw) {
   if (!raw) return null;
   if (typeof raw === 'number') {
@@ -102,7 +110,7 @@ for (const sheetName of wb.SheetNames) {
     sheetRows.push({
       date: dateStr, workoutTitle, supersetGroup: supersetRaw || null,
       exerciseName: resolved.name, exerciseExisting: resolved.existing,
-      sets: col.sets >= 0 && row[col.sets] !== '' ? Number(row[col.sets]) || null : null,
+      sets: col.sets >= 0 ? parseSets(row[col.sets]) : null,
       reps: col.reps >= 0 ? String(row[col.reps] ?? '').trim() || null : null,
       load: col.load >= 0 && row[col.load] !== '' ? Number(row[col.load]) || null : null,
       loadType: parseLoadType(loadTypeRaw),

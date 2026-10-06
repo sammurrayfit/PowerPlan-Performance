@@ -6,8 +6,9 @@ import fs from 'fs';
 // plus a Friday pre-activation-only session). Unlike sync_preactivation_personal
 // this never deletes calendars — the July–Oct history stays intact.
 //
-// Plan rows come from scripts/u15_preactivation_oct6_nov6.json (one row per
-// athlete × date × slot). Refuses to run if any Pre-Activation workout already
+// Plan rows come from the JSON given as the first argument (default
+// scripts/u15_preactivation_oct6_nov6.json; one row per athlete × date × slot).
+// An athlete without a Pre-Activation calendar gets one created. Refuses to run if any Pre-Activation workout already
 // exists in the date range, and rolls back its own inserts on failure.
 
 const env = Object.fromEntries(
@@ -32,7 +33,8 @@ const CATEGORY_FOR_NEW = {
 
 function fail(msg) { console.error('FATAL:', msg); process.exit(1); }
 
-const rows = JSON.parse(fs.readFileSync('scripts/u15_preactivation_oct6_nov6.json', 'utf8'));
+const planPath = process.argv[2] ?? 'scripts/u15_preactivation_oct6_nov6.json';
+const rows = JSON.parse(fs.readFileSync(planPath, 'utf8'));
 const athleteNames = [...new Set(rows.map(r => r.athlete))];
 const dates = [...new Set(rows.map(r => r.date))].sort();
 console.log(`Loaded ${rows.length} rows: ${athleteNames.length} athletes, ${dates[0]} → ${dates.at(-1)}`);
@@ -52,8 +54,18 @@ for (const c of cals) {
   if (calByAthlete[c.athlete_id]) fail(`Multiple Pre-Activation calendars for athlete ${c.athlete_id}`);
   calByAthlete[c.athlete_id] = c;
 }
-for (const n of athleteNames) if (!calByAthlete[athleteIdByName[n]]) fail(`No Pre-Activation calendar for ${n}`);
-const coachId = cals[0].coach_id;
+const COACH_ID = '43693c20-d17e-44d5-9e67-58b49db8bd15'; // Sam Murray, owner of every existing Pre-Activation calendar
+const coachId = cals[0]?.coach_id ?? COACH_ID;
+for (const n of athleteNames) {
+  if (calByAthlete[athleteIdByName[n]]) continue;
+  const { data, error } = await supabase.from('calendars')
+    .insert({ name: 'Pre-Activation', coach_id: coachId, athlete_id: athleteIdByName[n], team_id: null, color: '#7c3aed' })
+    .select('id, athlete_id, coach_id').single();
+  if (error) fail(`create Pre-Activation calendar for ${n}: ${error.message}`);
+  calByAthlete[data.athlete_id] = data;
+  cals.push(data);
+  console.log(`Created Pre-Activation calendar for ${n}`);
+}
 
 const { count: existing, error: exErr } = await supabase
   .from('workouts').select('id', { count: 'exact', head: true })
