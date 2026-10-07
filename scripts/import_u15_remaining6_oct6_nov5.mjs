@@ -12,7 +12,8 @@ import { MAP as EXERCISE_MAP } from './u15_exercise_mapping.mjs';
 // week. Every resulting session is checked to contain exactly week 1's exercises
 // for that title before anything is written.
 //
-// Usage: node scripts/import_u15_remaining6_oct6_nov5.mjs [--apply]
+// Usage: node scripts/import_u15_remaining6_oct6_nov5.mjs [--sheets="Name,Name"]
+//          [--move="Exercise=Session title"] [--allow-missing] [--apply]
 
 const env = Object.fromEntries(
   fs.readFileSync('.env.local', 'utf8').split('\n').filter(l => l.includes('='))
@@ -24,8 +25,20 @@ function fail(msg) { console.error('FATAL:', msg); process.exit(1); }
 const FILE = `${process.env.HOME}/Library/Mobile Documents/com~apple~CloudDocs/NYRB/Gym Programming/u15 Gym Template october to november.xlsx`;
 const COACH_ID = '43693c20-d17e-44d5-9e67-58b49db8bd15'; // Sam Murray
 const TARGET_CAL_NAME = 'U15 September–October 2026';
-const SHEETS = ['Jackson Yang', 'Saul Luna', 'Lee Hall', 'Leonardo Andrade', 'Sai Mudichintala', 'Andy Tagmee'];
+// Default: the 6 held-back sheets. Pass --sheets="Name,Name" for later additions.
+const sheetsArg = process.argv.find(a => a.startsWith('--sheets='));
+const SHEETS = sheetsArg
+  ? sheetsArg.slice('--sheets='.length).split(',').map(s => s.trim()).filter(Boolean)
+  : ['Jackson Yang', 'Saul Luna', 'Lee Hall', 'Leonardo Andrade', 'Sai Mudichintala', 'Andy Tagmee'];
 const WEEK1_END = '2026-10-08';
+// --move="DB RDL=Lower Body Posterior": coach-confirmed fix for an exercise that
+// sits in the wrong session even in week 1. It's placed on that session's day.
+const MOVES = Object.fromEntries(process.argv.filter(a => a.startsWith('--move=')).map(a => {
+  const [ex, title] = a.slice('--move='.length).split('=');
+  return [ex.trim().toLowerCase(), title.trim()];
+}));
+// --allow-missing: a session may lack some of week 1's exercises (e.g. a row the
+// sheet simply doesn't have); it's reported instead of aborting. Extras still abort.
 const APPLY = process.argv.includes('--apply');
 
 function toDateStr(raw) {
@@ -72,8 +85,14 @@ for (const sheetName of SHEETS) {
     const title = String(x.r[col.workout]).trim();
     if (template[key] && template[key].title !== title) fail(`${sheetName}: "${x.raw}" appears in two week-1 sessions`);
     template[key] = { offset: weekdayOffset(x.date), title };
-    (week1Sessions[title] ??= []).push(key);
   }
+  for (const [ex, title] of Object.entries(MOVES)) {
+    if (!template[ex]) fail(`${sheetName}: --move exercise "${ex}" not found in week 1`);
+    const target = Object.values(template).find(t => t.title === title);
+    if (!target) fail(`${sheetName}: --move session "${title}" not found in week 1`);
+    template[ex] = { offset: target.offset, title };
+  }
+  for (const [key, t] of Object.entries(template)) (week1Sessions[t.title] ??= []).push(key);
 
   const moves = [];
   const sessions = new Map(); // `${date}||${title}` -> rows
@@ -107,7 +126,10 @@ for (const sheetName of SHEETS) {
   for (const [key, list] of sessions) {
     const want = week1Sessions[key.split('||')[1]];
     const got = list.map(e => e.sourceKey);
-    if (got.length !== want.length || got.some(g => !want.includes(g))) fail(`${sheetName} ${key}: exercises don't match week 1 (${got.join(', ')})`);
+    if (got.some(g => !want.includes(g))) fail(`${sheetName} ${key}: exercises not in week 1's session (${got.join(', ')})`);
+    const missing = want.filter(w => !got.includes(w));
+    if (missing.length && !process.argv.includes('--allow-missing')) fail(`${sheetName} ${key}: missing week-1 exercises (${missing.join(', ')})`);
+    if (missing.length) console.log(`  note: ${sheetName} ${key} has no ${missing.join(', ')} (not in sheet)`);
     // Keep superset order (A before B before C), then sheet order within a group.
     list.sort((a, b) => (a.supersetGroup ?? '').localeCompare(b.supersetGroup ?? '') || a.rowNum - b.rowNum);
   }
@@ -133,6 +155,7 @@ console.log(APPLY ? 'APPLYING' : 'DRY RUN');
 for (const p of plans) {
   const exRows = [...p.sessions.values()].reduce((n, l) => n + l.length, 0);
   console.log(`  ${p.sheetName}: ${p.sessions.size} sessions, ${exRows} exercise rows, ${p.moves.length} rows re-placed`);
+  if (!APPLY) for (const m of p.moves) console.log(`      ${m}`);
 }
 if (!APPLY) { console.log('\nDry run only. Re-run with --apply to write to Supabase.'); process.exit(0); }
 
