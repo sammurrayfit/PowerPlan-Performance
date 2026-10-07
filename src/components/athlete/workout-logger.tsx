@@ -3,12 +3,12 @@
 import { Fragment, useState, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-import { autoRecordPR, epley1RM } from "@/lib/pr";
+import { autoRecordPR, epley1RM, isTimedReps } from "@/lib/pr";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, Circle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Play, Flag, Zap, Dumbbell } from "lucide-react";
+import { CheckCircle2, Circle, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Play, Flag, Zap, Dumbbell, Timer } from "lucide-react";
 import Link from "next/link";
 import { RPE_LABELS, RPE_OPTIONS } from "@/lib/rpe";
 
@@ -105,6 +105,16 @@ function defaultReps(prescribedReps: string, setIndex: number): string {
   return Number.isNaN(n) ? "" : String(n);
 }
 
+// Badge text for a prescription. Bare counts get "reps" ("8" -> "8 reps",
+// "5 each" -> "5 reps each"); anything already carrying its own unit
+// ("10 sec", "10 yd", "8 steps") is shown as written.
+function prescriptionLabel(reps: string): string {
+  if (/^[\d\s,\-]+$/.test(reps)) return `${reps} reps`;
+  const each = reps.match(/^([\d\s,\-]+?)\s*each$/i);
+  if (each) return `${each[1]} reps each`;
+  return reps;
+}
+
 // The "D" superset group is a convention for optional accessory work, shown
 // after the required A/B/C blocks. Flag the exercise that starts that block
 // so a divider can be rendered just above it.
@@ -142,6 +152,7 @@ function ExerciseCard({
   const effectiveLoadType = exercise.override?.load_type ?? exercise.load_type;
   const calcLbs = calcWeight(effectiveLoad, effectiveLoadType, exercise.max);
   const suggestedLoad = defaultLoad(effectiveLoad, effectiveLoadType, calcLbs);
+  const timed = isTimedReps(effectiveReps);
 
   const buildInitialRows = useCallback((): SetRow[] => {
     return Array.from({ length: effectiveSets }, (_, i) => {
@@ -236,7 +247,8 @@ function ExerciseCard({
   // Only reachable on the athlete-authenticated path; the coach kiosk path
   // (onSaveSet) records PRs server-side in saveKioskSet instead.
   async function maybeRecordPR(reps: number | null, load: number | null) {
-    if (reps == null || load == null) return;
+    // A timed set logs seconds held, which Epley would misread as reps.
+    if (reps == null || load == null || timed) return;
     try {
       const estimate = epley1RM(load, reps);
       await autoRecordPR(supabase, athleteId, exercise.exercise_id, estimate, "lbs", workoutDate);
@@ -309,7 +321,16 @@ function ExerciseCard({
               {effectiveReps ? `${effectiveSets} × ${effectiveReps}` : `${effectiveSets} ${effectiveSets === 1 ? "set" : "sets"}`}
             </Badge>
           ) : (
-            effectiveReps && <Badge variant="outline">{effectiveReps} reps</Badge>
+            effectiveReps && (
+              timed ? (
+                <Badge variant="outline" className="gap-1 border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-400">
+                  <Timer className="h-3 w-3" />
+                  {effectiveReps}
+                </Badge>
+              ) : (
+                <Badge variant="outline">{prescriptionLabel(effectiveReps)}</Badge>
+              )
+            )
           )}
           {loadLabel && <Badge variant="outline">{loadLabel}</Badge>}
           {exercise.tempo && <Badge variant="outline">Tempo: {exercise.tempo}</Badge>}
@@ -361,7 +382,7 @@ function ExerciseCard({
           {/* Column headers */}
           <div className={`grid gap-1 text-xs text-muted-foreground px-1 ${exercise.previousSession ? "grid-cols-[2rem_1fr_1fr_1fr_auto_2.25rem]" : "grid-cols-[2rem_1fr_1fr_1fr_2.25rem]"}`}>
             <span>Set</span>
-            <span>Reps</span>
+            <span className={timed ? "text-amber-700 dark:text-amber-400 font-medium" : undefined}>{timed ? "Seconds" : "Reps"}</span>
             <span>Load (lbs)</span>
             <span>RPE</span>
             {exercise.previousSession && <span className="text-primary font-medium">Last</span>}
@@ -371,7 +392,7 @@ function ExerciseCard({
           {rows.map((row, i) => {
             const prev = exercise.previousSession?.sets.find((s) => s.set_number === i + 1);
             const prevLabel = prev
-              ? [prev.load != null ? `${prev.load}lb` : null, prev.reps != null ? `×${prev.reps}` : null]
+              ? [prev.load != null ? `${prev.load}lb` : null, prev.reps != null ? (timed ? `${prev.reps}s` : `×${prev.reps}`) : null]
                   .filter(Boolean).join(" ") || "—"
               : null;
 

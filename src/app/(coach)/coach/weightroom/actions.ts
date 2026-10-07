@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEffectiveCoachId } from "@/lib/supabase/coach";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
-import { autoRecordPR, epley1RM } from "@/lib/pr";
+import { autoRecordPR, epley1RM, isTimedReps } from "@/lib/pr";
 
 function adminClient() {
   return createAdminClient(
@@ -78,10 +78,17 @@ export async function saveKioskSet(params: {
     if (params.repsCompleted != null && params.loadCompleted != null && wo?.date) {
       const { data: we } = await admin
         .from("workout_exercises")
-        .select("exercise_id")
+        .select("exercise_id, reps")
         .eq("id", params.workoutExerciseId)
         .single();
-      if (we?.exercise_id) {
+      const { data: override } = await admin
+        .from("athlete_exercise_overrides")
+        .select("reps")
+        .eq("workout_exercise_id", params.workoutExerciseId)
+        .eq("athlete_id", params.athleteId)
+        .maybeSingle();
+      // A timed set logs seconds held, which Epley would misread as reps.
+      if (we?.exercise_id && !isTimedReps(override?.reps ?? we.reps)) {
         const estimate = epley1RM(params.loadCompleted, params.repsCompleted);
         await autoRecordPR(admin, params.athleteId, we.exercise_id, estimate, "lbs", wo.date);
       }

@@ -7,6 +7,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const UNITS = ["lbs", "kg", "seconds", "meters"] as const;
 export type Unit = typeof UNITS[number];
 
+// A prescription measured in time ("10 sec", "20 sec each", "15 seconds"):
+// the logged reps value is seconds held, so it isn't a rep count.
+export function isTimedReps(reps: string | null | undefined): boolean {
+  return /\d\s*(s|secs?|seconds?)\b/i.test(reps ?? "");
+}
+
 // Epley estimated 1RM — converts a multi-rep lift to a comparable 1RM value
 export function epley1RM(weight: number, reps: number): number {
   if (reps <= 1) return weight;
