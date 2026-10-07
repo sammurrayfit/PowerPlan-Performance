@@ -1,73 +1,80 @@
 "use client";
 
-import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis,
-  CartesianGrid, Tooltip, Cell,
-} from "recharts";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, LabelList } from "recharts";
 import type { AttendanceRow } from "@/app/(coach)/coach/coaching-tools/reports/actions";
+import { StatCards, ChartCard, ChartTooltip, EmptyState, SortableTable, AXIS_TICK, GRID_STROKE, type Column } from "./report-ui";
 
-interface Props {
-  data: AttendanceRow[];
-  viewMode: "chart" | "table";
-}
-
+// Status colors (good / warning / critical), always shown next to the % label.
 function pctColor(pct: number) {
-  if (pct >= 90) return "#22c55e";
-  if (pct >= 70) return "#f97316";
-  return "#ef4444";
+  if (pct >= 90) return "#0ca30c";
+  if (pct >= 70) return "#fab219";
+  return "#d03b3b";
 }
 
-export function AttendanceReport({ data, viewMode }: Props) {
-  if (data.length === 0) {
-    return <p className="text-sm text-muted-foreground py-8 text-center">No attendance data for this period.</p>;
+const COLUMNS: Column<AttendanceRow>[] = [
+  { key: "name", header: "Athlete", cell: (r) => <span className="font-medium">{r.athleteName}</span>, sort: (r) => r.athleteName },
+  { key: "present", header: "Present", cell: (r) => r.present, sort: (r) => r.present, align: "right" },
+  { key: "late", header: "Late", cell: (r) => r.late, sort: (r) => r.late, align: "right" },
+  { key: "absent", header: "Absent", cell: (r) => r.absent, sort: (r) => r.absent, align: "right" },
+  { key: "total", header: "Recorded", cell: (r) => <span className="text-muted-foreground">{r.total}</span>, sort: (r) => r.total, align: "right" },
+  {
+    key: "pct", header: "Rate", align: "right", sort: (r) => (r.total ? r.pct : -1),
+    cell: (r) => r.total === 0 ? <span className="text-muted-foreground">—</span> : (
+      <span className="inline-flex items-center gap-1.5 font-semibold">
+        <span className="h-2 w-2 rounded-full" style={{ background: pctColor(r.pct) }} />
+        {r.pct}%
+      </span>
+    ),
+  },
+];
+
+export function AttendanceReport({ data }: { data: AttendanceRow[] }) {
+  const recorded = data.filter((r) => r.total > 0);
+  if (recorded.length === 0) {
+    return <EmptyState>No attendance recorded for this period.</EmptyState>;
   }
 
-  if (viewMode === "chart") {
-    const sorted = [...data].sort((a, b) => b.pct - a.pct);
-    return (
-      <ResponsiveContainer width="100%" height={Math.max(200, sorted.length * 44)}>
-        <BarChart data={sorted} layout="vertical" margin={{ left: 20, right: 40, top: 8, bottom: 8 }}>
-          <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-          <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 12 }} />
-          <YAxis type="category" dataKey="athleteName" width={120} tick={{ fontSize: 12 }} />
-          <Tooltip formatter={(v) => [`${v}%`, "Attendance"]} />
-          <Bar dataKey="pct" radius={[0, 4, 4, 0]}>
-            {sorted.map((entry) => (
-              <Cell key={entry.athleteId} fill={pctColor(entry.pct)} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    );
-  }
+  const present = recorded.reduce((s, r) => s + r.present, 0);
+  const late = recorded.reduce((s, r) => s + r.late, 0);
+  const absent = recorded.reduce((s, r) => s + r.absent, 0);
+  const total = present + late + absent;
+  const below = recorded.filter((r) => r.pct < 70).length;
+  const sorted = [...recorded].sort((a, b) => b.pct - a.pct);
 
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b bg-muted/50">
-            <th className="text-left px-4 py-2.5 font-medium">Athlete</th>
-            <th className="text-right px-4 py-2.5 font-medium text-green-600">Present</th>
-            <th className="text-right px-4 py-2.5 font-medium text-amber-600">Late</th>
-            <th className="text-right px-4 py-2.5 font-medium text-red-500">Absent</th>
-            <th className="text-right px-4 py-2.5 font-medium">Total</th>
-            <th className="text-right px-4 py-2.5 font-medium">Rate</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          {[...data].sort((a, b) => b.pct - a.pct).map((row) => (
-            <tr key={row.athleteId} className="hover:bg-muted/30">
-              <td className="px-4 py-2.5 font-medium">{row.athleteName}</td>
-              <td className="px-4 py-2.5 text-right tabular-nums">{row.present}</td>
-              <td className="px-4 py-2.5 text-right tabular-nums">{row.late}</td>
-              <td className="px-4 py-2.5 text-right tabular-nums">{row.absent}</td>
-              <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{row.total}</td>
-              <td className="px-4 py-2.5 text-right tabular-nums font-semibold"
-                style={{ color: pctColor(row.pct) }}>{row.pct}%</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-4">
+      <StatCards stats={[
+        { label: "Attendance rate", value: `${Math.round(((present + late) / total) * 100)}%`, hint: "present + late" },
+        { label: "Present", value: present },
+        { label: "Late", value: late },
+        { label: "Absent", value: absent, hint: below ? `${below} athlete${below === 1 ? "" : "s"} below 70%` : "everyone at 70%+" },
+      ]} />
+
+      {sorted.length > 1 && (
+        <ChartCard title="Attendance by athlete" subtitle="Share of recorded sessions attended (present or late)">
+          <ResponsiveContainer width="100%" height={sorted.length * 28 + 32}>
+            <BarChart data={sorted} layout="vertical" margin={{ left: 8, right: 40, top: 0, bottom: 0 }} barCategoryGap={4}>
+              <CartesianGrid horizontal={false} stroke={GRID_STROKE} />
+              <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="athleteName" width={130} tick={AXIS_TICK} axisLine={false} tickLine={false} interval={0} />
+              <Tooltip
+                cursor={{ fill: "var(--muted)", opacity: 0.5 }}
+                content={({ active, payload }) => {
+                  if (!active || !payload?.length) return null;
+                  const r = payload[0].payload as AttendanceRow;
+                  return <ChartTooltip title={r.athleteName} lines={[`${r.pct}% attended`, `${r.present} present · ${r.late} late · ${r.absent} absent`]} />;
+                }}
+              />
+              <Bar dataKey="pct" radius={[0, 4, 4, 0]} maxBarSize={18}>
+                {sorted.map((r) => <Cell key={r.athleteId} fill={pctColor(r.pct)} />)}
+                <LabelList dataKey="pct" position="right" formatter={(v) => `${v}%`} style={{ fontSize: 11, fill: "var(--foreground)" }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      )}
+
+      <SortableTable rows={data} columns={COLUMNS} rowKey={(r) => r.athleteId} initialSort={{ key: "pct", dir: "desc" }} />
     </div>
   );
 }

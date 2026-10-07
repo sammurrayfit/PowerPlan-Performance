@@ -1,6 +1,9 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { isTimedReps } from "@/lib/pr";
+
+type Supabase = Awaited<ReturnType<typeof createClient>>;
 
 // ── Date range helpers ────────────────────────────────────────────────────────
 
@@ -15,29 +18,97 @@ function dateRangeBounds(range: string): { start: string; end: string } {
   return { start: fmt(start), end: fmt(end) };
 }
 
-// ── Shared: get coach's calendar IDs and athlete IDs ─────────────────────────
+// Monday of the week containing `dateStr`, as YYYY-MM-DD.
+function weekStart(dateStr: string): string {
+  const d = new Date(dateStr + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
 
-async function getCoachScope(coachId: string) {
-  const supabase = await createClient();
+// ── Large-list queries ────────────────────────────────────────────────────────
 
+// PostgREST caps every response at 1000 rows, and a long `.in()` list can
+// overflow the request URL. Split the ids into chunks and page each chunk so
+// reports over a whole roster and season see every row.
+const ID_CHUNK = 100;
+const PAGE = 1000;
+
+async function selectIn<T>(
+  ids: string[],
+  run: (chunk: string[], from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>
+): Promise<T[]> {
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += ID_CHUNK) chunks.push(ids.slice(i, i + ID_CHUNK));
+  // Chunks run in parallel; pages within a chunk run in order (queries must
+  // sort on a unique column so pages don't overlap).
+  const results = await Promise.all(chunks.map(async (chunk) => {
+    const rows: T[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await run(chunk, from, from + PAGE - 1);
+      if (error) throw new Error(error.message);
+      rows.push(...((data ?? []) as T[]));
+      if (!data || data.length < PAGE) break;
+    }
+    return rows;
+  }));
+  return results.flat();
+}
+
+async function profileNames(supabase: Supabase, ids: string[]): Promise<Record<string, string>> {
+  const rows = await selectIn<{ id: string; full_name: string }>(ids, (c, f, t) =>
+    supabase.from("profiles").select("id, full_name").in("id", c).order("id").range(f, t)
+  );
+  return Object.fromEntries(rows.map((p) => [p.id, p.full_name]));
+}
+
+// ── Shared: the coach's calendars and athletes, optionally narrowed to a team ─
+
+async function getCoachScope(supabase: Supabase, coachId: string, teamId?: string | null) {
   const { data: calendars } = await supabase
     .from("calendars")
     .select("id, team_id, athlete_id")
     .eq("coach_id", coachId);
+  const cals = calendars ?? [];
 
-  const calIds = (calendars ?? []).map((c) => c.id);
-  const teamIds = (calendars ?? []).map((c) => c.team_id).filter(Boolean) as string[];
-  const directIds = (calendars ?? []).map((c) => c.athlete_id).filter(Boolean) as string[];
-
+  const teamIds = [...new Set(cals.map((c) => c.team_id).filter(Boolean))] as string[];
+  if (teamId && !teamIds.includes(teamId)) teamIds.push(teamId);
   const { data: memberships } = teamIds.length > 0
-    ? await supabase.from("team_memberships").select("athlete_id").in("team_id", teamIds)
+    ? await supabase.from("team_memberships").select("team_id, athlete_id").in("team_id", teamIds)
     : { data: [] };
 
-  const athleteIds = [
-    ...new Set([...(memberships ?? []).map((m) => m.athlete_id), ...directIds]),
-  ];
+  const athletesByTeam: Record<string, string[]> = {};
+  for (const m of memberships ?? []) (athletesByTeam[m.team_id] ??= []).push(m.athlete_id);
 
-  return { calIds, athleteIds };
+  // A workout on a team calendar applies to every member; on an individual
+  // calendar, to that one athlete.
+  const athletesByCalendar: Record<string, string[]> = {};
+  for (const c of cals) {
+    if (c.athlete_id) athletesByCalendar[c.id] = [c.athlete_id];
+    else if (c.team_id) athletesByCalendar[c.id] = athletesByTeam[c.team_id] ?? [];
+  }
+
+  let athleteIds = [...new Set(Object.values(athletesByCalendar).flat())];
+  let calIds = cals.map((c) => c.id);
+  if (teamId) {
+    const members = new Set(athletesByTeam[teamId] ?? []);
+    athleteIds = athleteIds.filter((id) => members.has(id));
+    calIds = cals.filter((c) => c.team_id === teamId || (c.athlete_id && members.has(c.athlete_id))).map((c) => c.id);
+  }
+
+  return { calIds, athleteIds, athletesByCalendar };
+}
+
+function targetAthletes(athleteIds: string[], athleteId: string): string[] {
+  if (athleteId === "all") return athleteIds;
+  return athleteIds.includes(athleteId) ? [athleteId] : [];
+}
+
+async function workoutsInRange(supabase: Supabase, calIds: string[], start: string, end: string, excludePreActivation = false) {
+  return selectIn<{ id: string; calendar_id: string; date: string; title: string }>(calIds, (c, f, t) => {
+    let q = supabase.from("workouts").select("id, calendar_id, date, title").in("calendar_id", c).gte("date", start).lte("date", end);
+    if (excludePreActivation) q = q.neq("title", "Pre-Activation");
+    return q.order("id").range(f, t);
+  });
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -53,8 +124,16 @@ export type AttendanceRow = {
 };
 
 export type VolumeWeek = {
-  week: string; // "May 12"
-  [athleteName: string]: number | string;
+  weekStart: string; // YYYY-MM-DD (Monday)
+  volume: number;
+  sets: number;
+};
+
+export type VolumeAthlete = {
+  athleteId: string;
+  athleteName: string;
+  totalSets: number;
+  totalVolume: number;
 };
 
 export type VolumeRow = {
@@ -74,11 +153,6 @@ export type PRRow = {
   exerciseName: string;
   value: number;
   unit: string;
-};
-
-export type MaxPoint = {
-  date: string;
-  [athleteName: string]: number | string;
 };
 
 export type MaxRow = {
@@ -103,64 +177,59 @@ export type CompletedWorkoutRow = {
   totalExercises: number;
 };
 
+export type RPERow = {
+  date: string;
+  athleteId: string;
+  athleteName: string;
+  rpe_pre: number | null;
+  rpe_post: number | null;
+  workoutTitle: string;
+};
+
 // ── 1. Attendance ─────────────────────────────────────────────────────────────
 
 export async function fetchAttendanceReport(
   coachId: string,
   range: string,
-  athleteId: string
+  athleteId: string,
+  teamId?: string | null
 ): Promise<AttendanceRow[]> {
   const supabase = await createClient();
   const { start, end } = dateRangeBounds(range);
-  const { calIds, athleteIds } = await getCoachScope(coachId);
-  if (calIds.length === 0 || athleteIds.length === 0) return [];
+  const { calIds, athleteIds } = await getCoachScope(supabase, coachId, teamId);
+  const targets = targetAthletes(athleteIds, athleteId);
+  if (calIds.length === 0 || targets.length === 0) return [];
 
-  const targetAthletes = athleteId === "all" ? athleteIds : [athleteId];
+  const workouts = await workoutsInRange(supabase, calIds, start, end);
+  if (workouts.length === 0) return [];
 
-  // Get workouts in range
-  const { data: workouts } = await supabase
-    .from("workouts")
-    .select("id")
-    .in("calendar_id", calIds)
-    .gte("date", start)
-    .lte("date", end);
+  const targetSet = new Set(targets);
+  const attendance = (await selectIn<{ athlete_id: string; status: string }>(workouts.map((w) => w.id), (c, f, t) =>
+    supabase.from("attendance").select("id, athlete_id, status").in("workout_id", c).order("id").range(f, t)
+  )).filter((a) => targetSet.has(a.athlete_id));
 
-  const workoutIds = (workouts ?? []).map((w) => w.id);
-  if (workoutIds.length === 0) return [];
-
-  const { data: attendance } = await supabase
-    .from("attendance")
-    .select("athlete_id, status")
-    .in("workout_id", workoutIds)
-    .in("athlete_id", targetAthletes);
-
-  const { data: profiles } = await supabase
-    .from("profiles")
-    .select("id, full_name")
-    .in("id", targetAthletes)
-    .order("full_name");
-
+  const names = await profileNames(supabase, targets);
   const counts: Record<string, { present: number; late: number; absent: number }> = {};
-  for (const id of targetAthletes) counts[id] = { present: 0, late: 0, absent: 0 };
-  for (const a of attendance ?? []) {
+  for (const id of targets) counts[id] = { present: 0, late: 0, absent: 0 };
+  for (const a of attendance) {
     if (a.status === "present") counts[a.athlete_id].present++;
     if (a.status === "late")    counts[a.athlete_id].late++;
     if (a.status === "absent")  counts[a.athlete_id].absent++;
   }
 
-  return (profiles ?? []).map((p) => {
-    const c = counts[p.id] ?? { present: 0, late: 0, absent: 0 };
-    const total = c.present + c.late + c.absent;
-    return {
-      athleteId: p.id,
-      athleteName: p.full_name,
-      present: c.present,
-      late: c.late,
-      absent: c.absent,
-      total,
-      pct: total > 0 ? Math.round(((c.present + c.late) / total) * 100) : 0,
-    };
-  });
+  return targets
+    .map((id) => {
+      const c = counts[id];
+      const total = c.present + c.late + c.absent;
+      return {
+        athleteId: id,
+        athleteName: names[id] ?? "Unknown",
+        ...c,
+        total,
+        pct: total > 0 ? Math.round(((c.present + c.late) / total) * 100) : 0,
+      };
+    })
+    .sort((a, b) => a.athleteName.localeCompare(b.athleteName));
 }
 
 // ── 1b. Completed workouts ────────────────────────────────────────────────────
@@ -169,83 +238,45 @@ export async function fetchCompletedWorkouts(
   coachId: string,
   range: string,
   athleteId: string,
-  specificDate?: string | null
+  specificDate?: string | null,
+  teamId?: string | null
 ): Promise<CompletedWorkoutRow[]> {
   const supabase = await createClient();
   const { start, end } = specificDate ? { start: specificDate, end: specificDate } : dateRangeBounds(range);
+  const { calIds, athleteIds, athletesByCalendar } = await getCoachScope(supabase, coachId, teamId);
+  const targets = targetAthletes(athleteIds, athleteId);
+  if (calIds.length === 0 || targets.length === 0) return [];
+  const targetSet = new Set(targets);
 
-  // Calendars are either shared across a team (team_id) or assigned to one
-  // athlete individually (athlete_id) — a workout on a shared calendar
-  // applies to every team member, so it's expanded into one row per athlete
-  // below rather than one row per workout.
-  const { data: calendars } = await supabase
-    .from("calendars")
-    .select("id, team_id, athlete_id")
-    .eq("coach_id", coachId);
-  if (!calendars || calendars.length === 0) return [];
-
-  const teamIds = [...new Set(calendars.map((c) => c.team_id).filter(Boolean))] as string[];
-  const { data: memberships } = teamIds.length > 0
-    ? await supabase.from("team_memberships").select("team_id, athlete_id").in("team_id", teamIds)
-    : { data: [] };
-
-  const athletesByTeam: Record<string, string[]> = {};
-  for (const m of memberships ?? []) {
-    (athletesByTeam[m.team_id] ??= []).push(m.athlete_id);
-  }
-
-  const athletesByCalendar: Record<string, string[]> = {};
-  for (const c of calendars) {
-    if (c.athlete_id) athletesByCalendar[c.id] = [c.athlete_id];
-    else if (c.team_id) athletesByCalendar[c.id] = athletesByTeam[c.team_id] ?? [];
-  }
-
-  const allAthleteIds = [...new Set(Object.values(athletesByCalendar).flat())];
-  if (allAthleteIds.length === 0) return [];
-  const targetAthletes = athleteId === "all" ? allAthleteIds : [athleteId];
-
-  const calIds = calendars.map((c) => c.id);
-  const { data: workouts } = await supabase
-    .from("workouts")
-    .select("id, calendar_id, date, title")
-    .in("calendar_id", calIds)
-    .neq("title", "Pre-Activation")
-    .gte("date", start)
-    .lte("date", end)
-    .order("date", { ascending: false });
-  if (!workouts || workouts.length === 0) return [];
-
+  const workouts = await workoutsInRange(supabase, calIds, start, end, true);
+  if (workouts.length === 0) return [];
   const workoutIds = workouts.map((w) => w.id);
 
-  const [{ data: profiles }, { data: attendance }, { data: exercises }, { data: logs }] = await Promise.all([
-    supabase.from("profiles").select("id, full_name").in("id", targetAthletes),
-    supabase.from("attendance").select("workout_id, athlete_id, status").in("workout_id", workoutIds).in("athlete_id", targetAthletes),
-    supabase.from("workout_exercises").select("id, workout_id").in("workout_id", workoutIds),
-    supabase.from("exercise_logs").select("workout_id, athlete_id, workout_exercise_id").in("workout_id", workoutIds).in("athlete_id", targetAthletes),
+  const [names, attendance, exercises, logs] = await Promise.all([
+    profileNames(supabase, targets),
+    selectIn<{ workout_id: string; athlete_id: string; status: "present" | "late" | "absent" }>(workoutIds, (c, f, t) =>
+      supabase.from("attendance").select("id, workout_id, athlete_id, status").in("workout_id", c).order("id").range(f, t)
+    ),
+    selectIn<{ workout_id: string }>(workoutIds, (c, f, t) =>
+      supabase.from("workout_exercises").select("id, workout_id").in("workout_id", c).order("id").range(f, t)
+    ),
+    selectIn<{ workout_id: string; athlete_id: string; workout_exercise_id: string }>(workoutIds, (c, f, t) =>
+      supabase.from("exercise_logs").select("id, workout_id, athlete_id, workout_exercise_id").in("workout_id", c).order("id").range(f, t)
+    ),
   ]);
 
-  const nameById = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.full_name]));
-
   const totalExByWorkout: Record<string, number> = {};
-  for (const e of exercises ?? []) {
-    totalExByWorkout[e.workout_id] = (totalExByWorkout[e.workout_id] ?? 0) + 1;
-  }
+  for (const e of exercises) totalExByWorkout[e.workout_id] = (totalExByWorkout[e.workout_id] ?? 0) + 1;
 
   const attendanceByWA: Record<string, "present" | "late" | "absent"> = {};
-  for (const a of attendance ?? []) {
-    attendanceByWA[`${a.workout_id}|${a.athlete_id}`] = a.status;
-  }
+  for (const a of attendance) attendanceByWA[`${a.workout_id}|${a.athlete_id}`] = a.status;
 
   const loggedExByWA: Record<string, Set<string>> = {};
-  for (const l of logs ?? []) {
-    const key = `${l.workout_id}|${l.athlete_id}`;
-    (loggedExByWA[key] ??= new Set()).add(l.workout_exercise_id);
-  }
+  for (const l of logs) (loggedExByWA[`${l.workout_id}|${l.athlete_id}`] ??= new Set()).add(l.workout_exercise_id);
 
   const rows: CompletedWorkoutRow[] = [];
   for (const w of workouts) {
-    const athletesForThisCalendar = (athletesByCalendar[w.calendar_id] ?? []).filter((id) => targetAthletes.includes(id));
-    for (const aid of athletesForThisCalendar) {
+    for (const aid of (athletesByCalendar[w.calendar_id] ?? []).filter((id) => targetSet.has(id))) {
       const key = `${w.id}|${aid}`;
       rows.push({
         workoutId: w.id,
@@ -253,7 +284,7 @@ export async function fetchCompletedWorkouts(
         date: w.date,
         title: w.title,
         athleteId: aid,
-        athleteName: nameById[aid] ?? "Unknown",
+        athleteName: names[aid] ?? "Unknown",
         attendanceStatus: attendanceByWA[key] ?? null,
         loggedExercises: loggedExByWA[key]?.size ?? 0,
         totalExercises: totalExByWorkout[w.id] ?? 0,
@@ -270,97 +301,64 @@ export async function fetchCompletedWorkouts(
 export async function fetchVolumeReport(
   coachId: string,
   range: string,
-  athleteId: string
-): Promise<{ weeks: VolumeWeek[]; rows: VolumeRow[]; athleteNames: string[] }> {
+  athleteId: string,
+  teamId?: string | null
+): Promise<{ weeks: VolumeWeek[]; athletes: VolumeAthlete[]; rows: VolumeRow[] }> {
+  const empty = { weeks: [], athletes: [], rows: [] };
   const supabase = await createClient();
   const { start, end } = dateRangeBounds(range);
-  const { calIds, athleteIds } = await getCoachScope(coachId);
-  if (calIds.length === 0 || athleteIds.length === 0) return { weeks: [], rows: [], athleteNames: [] };
+  const { calIds, athleteIds } = await getCoachScope(supabase, coachId, teamId);
+  const targets = targetAthletes(athleteIds, athleteId);
+  if (calIds.length === 0 || targets.length === 0) return empty;
+  const targetSet = new Set(targets);
 
-  const targetAthletes = athleteId === "all" ? athleteIds : [athleteId];
+  const workouts = await workoutsInRange(supabase, calIds, start, end);
+  if (workouts.length === 0) return empty;
+  const dateByWorkout = Object.fromEntries(workouts.map((w) => [w.id, w.date]));
 
-  const { data: workouts } = await supabase
-    .from("workouts")
-    .select("id, date")
-    .in("calendar_id", calIds)
-    .gte("date", start)
-    .lte("date", end);
+  const logs = (await selectIn<{ athlete_id: string; workout_id: string; workout_exercise_id: string; reps_completed: number | null; load_completed: number | null }>(
+    workouts.map((w) => w.id),
+    (c, f, t) => supabase.from("exercise_logs")
+      .select("id, athlete_id, workout_id, workout_exercise_id, reps_completed, load_completed")
+      .in("workout_id", c).order("id").range(f, t)
+  )).filter((l) => targetSet.has(l.athlete_id));
+  if (logs.length === 0) return empty;
 
-  const workoutIds = (workouts ?? []).map((w) => w.id);
-  const dateByWorkout = Object.fromEntries((workouts ?? []).map((w) => [w.id, w.date]));
-  if (workoutIds.length === 0) return { weeks: [], rows: [], athleteNames: [] };
+  const weIds = [...new Set(logs.map((l) => l.workout_exercise_id))];
+  const wes = await selectIn<{ id: string; reps: string | null; exercises: { name: string } | null }>(weIds, (c, f, t) =>
+    supabase.from("workout_exercises").select("id, reps, exercises(name)").in("id", c).order("id").range(f, t)
+  );
+  const weById = Object.fromEntries(wes.map((we) => [we.id, we]));
+  const names = await profileNames(supabase, targets);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: logs } = await supabase
-    .from("exercise_logs")
-    .select("athlete_id, workout_id, workout_exercise_id, reps_completed, load_completed")
-    .in("workout_id", workoutIds)
-    .in("athlete_id", targetAthletes);
+  const weekAcc: Record<string, VolumeWeek> = {};
+  const athleteAcc: Record<string, VolumeAthlete> = {};
+  const rowAcc: Record<string, VolumeRow> = {};
 
-  const weIds = [...new Set((logs ?? []).map((l: any) => l.workout_exercise_id))];
-  const { data: wes } = weIds.length > 0
-    ? await supabase.from("workout_exercises").select("id, exercise_id, exercises(name)").in("id", weIds)
-    : { data: [] };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const weMap: Record<string, string> = Object.fromEntries((wes ?? []).map((we: any) => [we.id, (we.exercises as any)?.name ?? "Unknown"]));
+  for (const l of logs) {
+    const we = weById[l.workout_exercise_id];
+    // A timed set's "reps" are seconds held — count the set but not tonnage.
+    const vol = isTimedReps(we?.reps) ? 0 : (l.reps_completed ?? 0) * (l.load_completed ?? 0);
+    const week = weekStart(dateByWorkout[l.workout_id]);
+    const exName = we?.exercises?.name ?? "Unknown";
 
-  const { data: profiles } = await supabase.from("profiles").select("id, full_name").in("id", targetAthletes).order("full_name");
-  const nameMap: Record<string, string> = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.full_name]));
-  const athleteNames = (profiles ?? []).map((p) => p.full_name);
+    const wk = (weekAcc[week] ??= { weekStart: week, volume: 0, sets: 0 });
+    wk.volume += vol; wk.sets++;
 
-  // Weekly aggregation for chart
-  function weekLabel(dateStr: string): string {
-    const d = new Date(dateStr + "T00:00:00");
-    const day = d.getDay();
-    const mon = new Date(d);
-    mon.setDate(d.getDate() - ((day + 6) % 7));
-    return mon.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const ath = (athleteAcc[l.athlete_id] ??= { athleteId: l.athlete_id, athleteName: names[l.athlete_id] ?? "Unknown", totalSets: 0, totalVolume: 0 });
+    ath.totalVolume += vol; ath.totalSets++;
+
+    const row = (rowAcc[`${l.athlete_id}|${exName}`] ??= {
+      athleteId: l.athlete_id, athleteName: ath.athleteName, exerciseName: exName, totalSets: 0, totalReps: 0, totalVolume: 0,
+    });
+    row.totalSets++; row.totalReps += isTimedReps(we?.reps) ? 0 : l.reps_completed ?? 0; row.totalVolume += vol;
   }
 
-  const weekMap: Record<string, Record<string, number>> = {};
-  const rowAccum: Record<string, Record<string, { sets: number; reps: number; vol: number }>> = {};
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const l of logs ?? [] as any[]) {
-    const date = dateByWorkout[l.workout_id] ?? "";
-    const week = weekLabel(date);
-    const name = nameMap[l.athlete_id] ?? l.athlete_id;
-    const exName = weMap[l.workout_exercise_id] ?? "Unknown";
-    const vol = (l.reps_completed ?? 0) * (l.load_completed ?? 0);
-
-    if (!weekMap[week]) weekMap[week] = {};
-    weekMap[week][name] = (weekMap[week][name] ?? 0) + vol;
-
-    const rkey = `${l.athlete_id}__${l.workout_exercise_id}`;
-    if (!rowAccum[rkey]) rowAccum[rkey] = {};
-    if (!rowAccum[rkey][exName]) rowAccum[rkey][exName] = { sets: 0, reps: 0, vol: 0 };
-    rowAccum[rkey][exName].sets++;
-    rowAccum[rkey][exName].reps += l.reps_completed ?? 0;
-    rowAccum[rkey][exName].vol  += vol;
-  }
-
-  // Sort weeks chronologically
-  const weeks: VolumeWeek[] = Object.entries(weekMap)
-    .sort(([a], [b]) => new Date("2020 " + a).getTime() - new Date("2020 " + b).getTime())
-    .map(([week, byAthlete]) => ({ week, ...byAthlete }));
-
-  const rows: VolumeRow[] = [];
-  for (const [rkey, exMap] of Object.entries(rowAccum)) {
-    const [athleteId] = rkey.split("__");
-    for (const [exName, agg] of Object.entries(exMap)) {
-      rows.push({
-        athleteId,
-        athleteName: nameMap[athleteId] ?? athleteId,
-        exerciseName: exName,
-        totalSets: agg.sets,
-        totalReps: agg.reps,
-        totalVolume: agg.vol,
-      });
-    }
-  }
-  rows.sort((a, b) => b.totalVolume - a.totalVolume);
-
-  return { weeks, rows, athleteNames };
+  return {
+    weeks: Object.values(weekAcc).sort((a, b) => a.weekStart.localeCompare(b.weekStart)),
+    athletes: Object.values(athleteAcc).sort((a, b) => b.totalVolume - a.totalVolume),
+    rows: Object.values(rowAcc).sort((a, b) => b.totalVolume - a.totalVolume),
+  };
 }
 
 // ── 3. PR History ─────────────────────────────────────────────────────────────
@@ -368,138 +366,74 @@ export async function fetchVolumeReport(
 export async function fetchPRReport(
   coachId: string,
   range: string,
-  athleteId: string
-): Promise<{ rows: PRRow[]; chartData: { date: string; [athlete: string]: number | string }[] }> {
+  athleteId: string,
+  teamId?: string | null
+): Promise<PRRow[]> {
   const supabase = await createClient();
   const { start, end } = dateRangeBounds(range);
-  const { athleteIds } = await getCoachScope(coachId);
-  if (athleteIds.length === 0) return { rows: [], chartData: [] };
+  const { athleteIds } = await getCoachScope(supabase, coachId, teamId);
+  const targets = targetAthletes(athleteIds, athleteId);
+  if (targets.length === 0) return [];
 
-  const targetAthletes = athleteId === "all" ? athleteIds : [athleteId];
+  const prs = await selectIn<{ athlete_id: string; exercise_id: string; value: number; unit: string; date_achieved: string; exercises: { name: string } | null }>(
+    targets,
+    (c, f, t) => supabase.from("personal_records")
+      .select("id, athlete_id, exercise_id, value, unit, date_achieved, exercises(name)")
+      .in("athlete_id", c).gte("date_achieved", start).lte("date_achieved", end)
+      .order("id").range(f, t)
+  );
+  const names = await profileNames(supabase, targets);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: prs } = await supabase
-    .from("personal_records")
-    .select("id, athlete_id, exercise_id, value, unit, date_achieved, exercises(name)")
-    .in("athlete_id", targetAthletes)
-    .gte("date_achieved", start)
-    .lte("date_achieved", end)
-    .order("date_achieved", { ascending: false });
-
-  const { data: profiles } = await supabase.from("profiles").select("id, full_name").in("id", targetAthletes);
-  const nameMap: Record<string, string> = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.full_name]));
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: PRRow[] = (prs ?? [] as any[]).map((pr: any) => ({
-    date: pr.date_achieved,
-    athleteId: pr.athlete_id,
-    athleteName: nameMap[pr.athlete_id] ?? pr.athlete_id,
-    exerciseId: pr.exercise_id,
-    exerciseName: (pr.exercises as any)?.name ?? "Unknown",
-    value: Number(pr.value),
-    unit: pr.unit,
-  }));
-
-  // For scatter chart: one point per PR
-  const chartData = rows.map((r) => ({
-    date: r.date,
-    [r.athleteName]: r.value,
-    exercise: r.exerciseName,
-    athlete: r.athleteName,
-    value: r.value,
-    unit: r.unit,
-  }));
-
-  return { rows, chartData };
+  return prs
+    .map((pr) => ({
+      date: pr.date_achieved,
+      athleteId: pr.athlete_id,
+      athleteName: names[pr.athlete_id] ?? "Unknown",
+      exerciseId: pr.exercise_id,
+      exerciseName: pr.exercises?.name ?? "Unknown",
+      value: Number(pr.value),
+      unit: pr.unit,
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date));
 }
 
 // ── 4. RPE Trends ────────────────────────────────────────────────────────────
 
-export type RPERow = {
-  date: string;
-  athleteId: string;
-  athleteName: string;
-  rpe_pre: number | null;
-  rpe_post: number | null;
-  workoutTitle: string;
-};
-
-export type RPEPoint = {
-  date: string;
-  [key: string]: number | string | null;
-};
-
 export async function fetchRPEReport(
   coachId: string,
   range: string,
-  athleteId: string
-): Promise<{ rows: RPERow[]; prePoints: RPEPoint[]; postPoints: RPEPoint[] }> {
+  athleteId: string,
+  teamId?: string | null
+): Promise<RPERow[]> {
   const supabase = await createClient();
   const { start, end } = dateRangeBounds(range);
-  const { calIds, athleteIds } = await getCoachScope(coachId);
-  if (calIds.length === 0 || athleteIds.length === 0) return { rows: [], prePoints: [], postPoints: [] };
+  const { calIds, athleteIds } = await getCoachScope(supabase, coachId, teamId);
+  const targets = targetAthletes(athleteIds, athleteId);
+  if (calIds.length === 0 || targets.length === 0) return [];
+  const targetSet = new Set(targets);
 
-  const targetAthletes = athleteId === "all" ? athleteIds : [athleteId];
+  const workouts = await workoutsInRange(supabase, calIds, start, end);
+  if (workouts.length === 0) return [];
+  const workoutMeta = Object.fromEntries(workouts.map((w) => [w.id, w]));
 
-  const { data: workouts } = await supabase
-    .from("workouts")
-    .select("id, date, title")
-    .in("calendar_id", calIds)
-    .gte("date", start)
-    .lte("date", end);
+  const attendance = (await selectIn<{ athlete_id: string; workout_id: string; rpe_pre: number | null; rpe_post: number | null }>(
+    workouts.map((w) => w.id),
+    (c, f, t) => supabase.from("attendance")
+      .select("id, athlete_id, workout_id, rpe_pre, rpe_post")
+      .in("workout_id", c).not("rpe_pre", "is", null).order("id").range(f, t)
+  )).filter((a) => targetSet.has(a.athlete_id));
+  const names = await profileNames(supabase, targets);
 
-  const workoutIds = (workouts ?? []).map((w) => w.id);
-  if (workoutIds.length === 0) return { rows: [], prePoints: [], postPoints: [] };
-
-  const workoutMeta = Object.fromEntries((workouts ?? []).map((w) => [w.id, { date: w.date, title: w.title }]));
-
-  const { data: attendance } = await supabase
-    .from("attendance")
-    .select("athlete_id, workout_id, rpe_pre, rpe_post")
-    .in("workout_id", workoutIds)
-    .in("athlete_id", targetAthletes)
-    .not("rpe_pre", "is", null);
-
-  const { data: profiles } = await supabase
-    .from("profiles")
-    .select("id, full_name")
-    .in("id", targetAthletes)
-    .order("full_name");
-
-  const nameMap: Record<string, string> = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.full_name]));
-
-  // Build rows
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: RPERow[] = (attendance ?? [] as any[])
-    .map((a: any) => ({
-      date: workoutMeta[a.workout_id]?.date ?? "",
+  return attendance
+    .map((a) => ({
+      date: workoutMeta[a.workout_id].date,
       athleteId: a.athlete_id,
-      athleteName: nameMap[a.athlete_id] ?? a.athlete_id,
+      athleteName: names[a.athlete_id] ?? "Unknown",
       rpe_pre: a.rpe_pre,
       rpe_post: a.rpe_post,
-      workoutTitle: workoutMeta[a.workout_id]?.title ?? "",
+      workoutTitle: workoutMeta[a.workout_id].title,
     }))
-    .filter((r) => r.date)
     .sort((a, b) => b.date.localeCompare(a.date));
-
-  // Build chart points keyed by date — one per-athlete value
-  const preMap: Record<string, Record<string, number>> = {};
-  const postMap: Record<string, Record<string, number>> = {};
-
-  for (const r of rows) {
-    const name = r.athleteName;
-    if (!preMap[r.date]) preMap[r.date] = {};
-    if (!postMap[r.date]) postMap[r.date] = {};
-    if (r.rpe_pre != null) preMap[r.date][name] = r.rpe_pre;
-    if (r.rpe_post != null) postMap[r.date][name] = r.rpe_post;
-  }
-
-  const allDates = [...new Set([...Object.keys(preMap), ...Object.keys(postMap)])].sort();
-
-  const prePoints: RPEPoint[] = allDates.map((d) => ({ date: d, ...(preMap[d] ?? {}) }));
-  const postPoints: RPEPoint[] = allDates.map((d) => ({ date: d, ...(postMap[d] ?? {}) }));
-
-  return { rows, prePoints, postPoints };
 }
 
 // ── 5. Max Progression ────────────────────────────────────────────────────────
@@ -507,68 +441,40 @@ export async function fetchRPEReport(
 export async function fetchMaxProgressionReport(
   coachId: string,
   athleteId: string,
-  exerciseId: string
-): Promise<{ points: MaxPoint[]; rows: MaxRow[]; exerciseIds: string[] }> {
+  exerciseId: string,
+  teamId?: string | null
+): Promise<MaxRow[]> {
   const supabase = await createClient();
-  const { athleteIds } = await getCoachScope(coachId);
-  if (athleteIds.length === 0) return { points: [], rows: [], exerciseIds: [] };
+  const { athleteIds } = await getCoachScope(supabase, coachId, teamId);
+  const targets = targetAthletes(athleteIds, athleteId);
+  if (targets.length === 0) return [];
 
-  const targetAthletes = athleteId === "all" ? athleteIds : [athleteId];
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const query = supabase
-    .from("maxes")
-    .select("athlete_id, exercise_id, value, unit, date_recorded, exercises(name)")
-    .in("athlete_id", targetAthletes)
-    .order("date_recorded", { ascending: true });
-
-  const { data: maxes } = exerciseId !== "all"
-    ? await query.eq("exercise_id", exerciseId)
-    : await query;
-
-  const { data: profiles } = await supabase.from("profiles").select("id, full_name").in("id", targetAthletes);
-  const nameMap: Record<string, string> = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.full_name]));
-
-  const exerciseIds = [...new Set((maxes ?? []).map((m: any) => m.exercise_id))];
-
-  // Line chart: one point per date, value per athlete
-  const dateAthleteMap: Record<string, Record<string, number>> = {};
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const m of maxes ?? [] as any[]) {
-    const name = nameMap[m.athlete_id] ?? m.athlete_id;
-    if (!dateAthleteMap[m.date_recorded]) dateAthleteMap[m.date_recorded] = {};
-    dateAthleteMap[m.date_recorded][name] = Number(m.value);
-  }
-  const points: MaxPoint[] = Object.entries(dateAthleteMap)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, vals]) => ({ date, ...vals }));
-
-  // Table rows: per athlete per exercise, latest + history
-  const byAthleteEx: Record<string, { dates: string[]; vals: number[]; unit: string; exName: string; exId: string }> = {};
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const m of maxes ?? [] as any[]) {
-    const key = `${m.athlete_id}__${m.exercise_id}`;
-    if (!byAthleteEx[key]) {
-      byAthleteEx[key] = { dates: [], vals: [], unit: m.unit, exName: (m.exercises as any)?.name ?? "Unknown", exId: m.exercise_id };
+  const maxes = await selectIn<{ athlete_id: string; exercise_id: string; value: number; unit: string; date_recorded: string; exercises: { name: string } | null }>(
+    targets,
+    (c, f, t) => {
+      let q = supabase.from("maxes")
+        .select("id, athlete_id, exercise_id, value, unit, date_recorded, exercises(name)")
+        .in("athlete_id", c);
+      if (exerciseId !== "all") q = q.eq("exercise_id", exerciseId);
+      return q.order("id").range(f, t);
     }
-    byAthleteEx[key].dates.push(m.date_recorded);
-    byAthleteEx[key].vals.push(Number(m.value));
+  );
+  const names = await profileNames(supabase, targets);
+
+  const byAthleteEx: Record<string, MaxRow> = {};
+  for (const m of [...maxes].sort((a, b) => a.date_recorded.localeCompare(b.date_recorded))) {
+    const row = (byAthleteEx[`${m.athlete_id}|${m.exercise_id}`] ??= {
+      athleteId: m.athlete_id,
+      athleteName: names[m.athlete_id] ?? "Unknown",
+      exerciseId: m.exercise_id,
+      exerciseName: m.exercises?.name ?? "Unknown",
+      current: 0,
+      unit: m.unit,
+      history: [],
+    });
+    row.history.push({ date: m.date_recorded, value: Number(m.value) });
+    row.current = Number(m.value);
   }
 
-  const rows: MaxRow[] = Object.entries(byAthleteEx).map(([key, data]) => {
-    const [aId] = key.split("__");
-    const latest = data.vals[data.vals.length - 1];
-    return {
-      athleteId: aId,
-      athleteName: nameMap[aId] ?? aId,
-      exerciseId: data.exId,
-      exerciseName: data.exName,
-      current: latest,
-      unit: data.unit,
-      history: data.dates.map((d, i) => ({ date: d, value: data.vals[i] })),
-    };
-  });
-  rows.sort((a, b) => b.current - a.current);
-
-  return { points, rows, exerciseIds };
+  return Object.values(byAthleteEx).sort((a, b) => b.current - a.current);
 }

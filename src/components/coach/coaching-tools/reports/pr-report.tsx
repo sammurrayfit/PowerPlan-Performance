@@ -1,101 +1,72 @@
 "use client";
 
-import {
-  ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis,
-  CartesianGrid, Tooltip, Legend,
-} from "recharts";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import type { PRRow } from "@/app/(coach)/coach/coaching-tools/reports/actions";
+import { StatCards, ChartCard, ChartTooltip, EmptyState, SortableTable, SERIES_1, AXIS_TICK, GRID_STROKE, shortDate, longDate, type Column } from "./report-ui";
 
-interface Props {
-  rows: PRRow[];
-  viewMode: "chart" | "table";
-}
-
-const COLORS = [
-  "#7c3aed","#32127A","#a78bfa","#6d28d9",
-  "#ef4444","#a855f7","#ec4899","#14b8a6",
+const COLUMNS: Column<PRRow>[] = [
+  { key: "date", header: "Date", cell: (r) => <span className="text-muted-foreground whitespace-nowrap">{longDate(r.date)}</span>, sort: (r) => r.date },
+  { key: "athlete", header: "Athlete", cell: (r) => <span className="font-medium">{r.athleteName}</span>, sort: (r) => r.athleteName },
+  { key: "exercise", header: "Exercise", cell: (r) => <span className="text-muted-foreground">{r.exerciseName}</span>, sort: (r) => r.exerciseName },
+  { key: "value", header: "PR", cell: (r) => <span className="font-semibold">{r.value} {r.unit}</span>, sort: (r) => r.value, align: "right" },
 ];
 
-export function PRReport({ rows, viewMode }: Props) {
+function weekStart(dateStr: string): string {
+  const d = new Date(dateStr + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
+
+function mostCommon(values: string[]): [string, number] | null {
+  const counts: Record<string, number> = {};
+  for (const v of values) counts[v] = (counts[v] ?? 0) + 1;
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0] ?? null;
+}
+
+export function PRReport({ rows }: { rows: PRRow[] }) {
   if (rows.length === 0) {
-    return <p className="text-sm text-muted-foreground py-8 text-center">No PRs recorded for this period.</p>;
+    return <EmptyState>No PRs recorded for this period.</EmptyState>;
   }
 
-  if (viewMode === "chart") {
-    // Group by athlete for separate scatter series
-    const byAthlete: Record<string, { x: number; y: number; exercise: string }[]> = {};
-    for (const r of rows) {
-      if (!byAthlete[r.athleteName]) byAthlete[r.athleteName] = [];
-      byAthlete[r.athleteName].push({
-        x: new Date(r.date).getTime(),
-        y: r.value,
-        exercise: r.exerciseName,
-      });
-    }
-    const athletes = Object.keys(byAthlete);
+  const byWeek: Record<string, number> = {};
+  for (const r of rows) byWeek[weekStart(r.date)] = (byWeek[weekStart(r.date)] ?? 0) + 1;
+  const weeks = Object.entries(byWeek).sort(([a], [b]) => a.localeCompare(b)).map(([week, count]) => ({ week, count }));
 
-    return (
-      <ResponsiveContainer width="100%" height={320}>
-        <ScatterChart margin={{ left: 16, right: 16, top: 8, bottom: 8 }}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis
-            dataKey="x"
-            type="number"
-            scale="time"
-            domain={["auto", "auto"]}
-            tickFormatter={(v) => new Date(v).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-            tick={{ fontSize: 11 }}
-          />
-          <YAxis dataKey="y" name="Load" unit=" lbs" tick={{ fontSize: 12 }} />
-          <Tooltip
-            cursor={{ strokeDasharray: "3 3" }}
-            content={({ active, payload }) => {
-              if (!active || !payload?.length) return null;
-              const d = payload[0].payload;
-              return (
-                <div className="rounded-lg border bg-background px-3 py-2 text-xs shadow-md">
-                  <p className="font-semibold">{d.exercise}</p>
-                  <p>{d.y} lbs</p>
-                  <p className="text-muted-foreground">{new Date(d.x).toLocaleDateString()}</p>
-                </div>
-              );
-            }}
-          />
-          <Legend />
-          {athletes.map((name, i) => (
-            <Scatter key={name} name={name} data={byAthlete[name]} fill={COLORS[i % COLORS.length]} />
-          ))}
-        </ScatterChart>
-      </ResponsiveContainer>
-    );
-  }
+  const topExercise = mostCommon(rows.map((r) => r.exerciseName));
+  const topAthlete = mostCommon(rows.map((r) => r.athleteName));
+  const athleteCount = new Set(rows.map((r) => r.athleteId)).size;
 
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b bg-muted/50">
-            <th className="text-left px-4 py-2.5 font-medium">Date</th>
-            <th className="text-left px-4 py-2.5 font-medium">Athlete</th>
-            <th className="text-left px-4 py-2.5 font-medium">Exercise</th>
-            <th className="text-right px-4 py-2.5 font-medium">PR</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          {rows.map((row, i) => (
-            <tr key={i} className="hover:bg-muted/30">
-              <td className="px-4 py-2.5 text-muted-foreground tabular-nums">
-                {new Date(row.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-              </td>
-              <td className="px-4 py-2.5 font-medium">{row.athleteName}</td>
-              <td className="px-4 py-2.5 text-muted-foreground">{row.exerciseName}</td>
-              <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-green-600">
-                {row.value} {row.unit}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-4">
+      <StatCards stats={[
+        { label: "PRs set", value: rows.length },
+        { label: "Athletes with a PR", value: athleteCount },
+        { label: "Top exercise", value: topExercise?.[1] ?? 0, hint: topExercise?.[0] },
+        { label: "Most PRs", value: topAthlete?.[1] ?? 0, hint: topAthlete?.[0] },
+      ]} />
+
+      {weeks.length > 1 && (
+        <ChartCard title="PRs per week" subtitle="By week starting">
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={weeks} margin={{ left: 0, right: 8, top: 8, bottom: 0 }} barCategoryGap="20%">
+              <CartesianGrid vertical={false} stroke={GRID_STROKE} />
+              <XAxis dataKey="week" tickFormatter={shortDate} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+              <YAxis allowDecimals={false} tick={AXIS_TICK} axisLine={false} tickLine={false} width={32} />
+              <Tooltip
+                cursor={{ fill: "var(--muted)", opacity: 0.5 }}
+                content={({ active, payload }) => {
+                  if (!active || !payload?.length) return null;
+                  const w = payload[0].payload as { week: string; count: number };
+                  return <ChartTooltip title={`Week of ${shortDate(w.week)}`} lines={[`${w.count} PR${w.count === 1 ? "" : "s"}`]} />;
+                }}
+              />
+              <Bar dataKey="count" fill={SERIES_1} radius={[4, 4, 0, 0]} maxBarSize={48} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      )}
+
+      <SortableTable rows={rows} columns={COLUMNS} rowKey={(r) => `${r.athleteId}|${r.exerciseId}|${r.date}|${r.value}`} initialSort={{ key: "date", dir: "desc" }} />
     </div>
   );
 }
