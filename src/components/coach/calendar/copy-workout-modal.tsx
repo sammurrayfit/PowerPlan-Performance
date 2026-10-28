@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Copy } from "lucide-react";
-import { copyWorkout } from "@/app/(coach)/coach/calendar/actions";
+import { copyWorkout, listCopyTargetCalendars, type CopyTargetCalendar } from "@/app/(coach)/coach/calendar/actions";
 import { toast } from "sonner";
 
 type Mode = "single" | "multi" | "weekly";
@@ -83,13 +83,80 @@ function MultiDatePicker({ selected, onChange }: { selected: string[]; onChange:
   );
 }
 
+function CalendarPicker({ calendars, currentCalendarId, selected, onChange }: {
+  calendars: CopyTargetCalendar[] | null;
+  currentCalendarId: string;
+  selected: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [query, setQuery] = useState("");
+  if (!calendars) return <p className="text-xs text-muted-foreground">Loading calendars…</p>;
+
+  const q = query.trim().toLowerCase();
+  const visible = q
+    ? calendars.filter((c) => c.label.toLowerCase().includes(q) || (c.team ?? "").toLowerCase().includes(q))
+    : calendars;
+  const allVisibleSelected = visible.length > 0 && visible.every((c) => selected.includes(c.id));
+
+  function toggle(id: string) {
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  }
+  function toggleVisible() {
+    const ids = visible.map((c) => c.id);
+    onChange(allVisibleSelected ? selected.filter((id) => !ids.includes(id)) : [...new Set([...selected, ...ids])]);
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <Label>Calendars</Label>
+        <span className="text-xs text-muted-foreground">{selected.length} selected</span>
+      </div>
+      <div className="flex gap-2">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search calendar, athlete or team"
+          className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+        />
+        <Button type="button" variant="outline" size="sm" onClick={toggleVisible} disabled={visible.length === 0}>
+          {allVisibleSelected ? "Clear" : "Select all"}
+        </Button>
+      </div>
+      <div className="max-h-44 overflow-y-auto rounded-md border divide-y">
+        {visible.map((c) => (
+          <label key={c.id} className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-muted/50">
+            <input type="checkbox" checked={selected.includes(c.id)} onChange={() => toggle(c.id)} />
+            <span className="flex-1 truncate">
+              {c.label}
+              {c.id === currentCalendarId && <span className="text-muted-foreground"> (this calendar)</span>}
+            </span>
+            {c.team && <span className="text-xs text-muted-foreground shrink-0">{c.team}</span>}
+          </label>
+        ))}
+        {visible.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">No calendars match</p>}
+      </div>
+    </div>
+  );
+}
+
 interface CopyWorkoutModalProps {
   workoutId: string;
   workoutTitle: string;
+  calendarId: string;
 }
 
-export function CopyWorkoutModal({ workoutId, workoutTitle }: CopyWorkoutModalProps) {
+export function CopyWorkoutModal({ workoutId, workoutTitle, calendarId }: CopyWorkoutModalProps) {
   const [open, setOpen] = useState(false);
+  const [calendars, setCalendars] = useState<CopyTargetCalendar[] | null>(null);
+  const [targetCalendarIds, setTargetCalendarIds] = useState<string[]>([calendarId]);
+
+  useEffect(() => {
+    if (!open || calendars) return;
+    listCopyTargetCalendars()
+      .then(setCalendars)
+      .catch(() => toast.error("Failed to load calendars"));
+  }, [open, calendars]);
   const [mode, setMode] = useState<Mode>("single");
   const [loading, setLoading] = useState(false);
   const [replace, setReplace] = useState(false);
@@ -124,8 +191,11 @@ export function CopyWorkoutModal({ workoutId, workoutTitle }: CopyWorkoutModalPr
     if (targetDates.length === 0) return;
     setLoading(true);
     try {
-      await copyWorkout(workoutId, targetDates, replace);
+      await copyWorkout(workoutId, targetDates, replace, targetCalendarIds);
+      const total = targetDates.length * targetCalendarIds.length;
+      toast.success(`Copied to ${total} workout${total !== 1 ? "s" : ""}`);
       setOpen(false);
+      setTargetCalendarIds([calendarId]);
       setSingleDate("");
       setMultiDates([]);
       setWeeklyStart("");
@@ -150,6 +220,13 @@ export function CopyWorkoutModal({ workoutId, workoutTitle }: CopyWorkoutModalPr
           <DialogHeader>
             <DialogTitle>Copy "{workoutTitle}"</DialogTitle>
           </DialogHeader>
+
+          <CalendarPicker
+            calendars={calendars}
+            currentCalendarId={calendarId}
+            selected={targetCalendarIds}
+            onChange={setTargetCalendarIds}
+          />
 
           {/* Mode selector */}
           <div className="flex rounded-md border overflow-hidden text-sm">
@@ -247,15 +324,18 @@ export function CopyWorkoutModal({ workoutId, workoutTitle }: CopyWorkoutModalPr
             <div>
               <p className="font-medium leading-none">Replace existing workouts</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Delete any existing workout on the target date before copying
+                Delete any existing workout on the target date (in each selected calendar) before copying
               </p>
             </div>
           </button>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={handleCopy} disabled={targetDates.length === 0 || loading}>
-              {loading ? "Copying…" : `Copy to ${targetDates.length} date${targetDates.length !== 1 ? "s" : ""}`}
+            <Button onClick={handleCopy} disabled={targetDates.length === 0 || targetCalendarIds.length === 0 || loading}>
+              {loading
+                ? "Copying…"
+                : `Copy to ${targetDates.length} date${targetDates.length !== 1 ? "s" : ""}` +
+                  (targetCalendarIds.length > 1 ? ` × ${targetCalendarIds.length} calendars` : "")}
             </Button>
           </DialogFooter>
         </DialogContent>

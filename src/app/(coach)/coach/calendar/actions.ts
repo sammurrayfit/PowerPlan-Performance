@@ -77,8 +77,53 @@ export async function deleteWorkout(id: string, calendarId: string) {
   redirect(`/coach/calendar/${calendarId}`);
 }
 
-export async function copyWorkout(workoutId: string, targetDates: string[], replace = false) {
+export interface CopyTargetCalendar {
+  id: string;
+  label: string;
+  team: string | null;
+}
+
+// Every calendar the coach can copy into: team calendars plus athletes' personal
+// calendars (labelled with the athlete's name, since many share a calendar name).
+export async function listCopyTargetCalendars(): Promise<CopyTargetCalendar[]> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
+
+  const [{ data: calendars }, { data: teams }] = await Promise.all([
+    supabase.from("calendars").select("id, name, team_id, athlete_id").eq("coach_id", effectiveCoachId),
+    supabase.from("teams").select("id, name").eq("coach_id", effectiveCoachId),
+  ]);
+  const cals = calendars ?? [];
+  const teamName = Object.fromEntries((teams ?? []).map((t) => [t.id, t.name]));
+
+  const athleteIds = [...new Set(cals.map((c) => c.athlete_id).filter(Boolean))] as string[];
+  const athleteName: Record<string, string> = {};
+  const athleteTeam: Record<string, string> = {};
+  if (athleteIds.length) {
+    const [{ data: profiles }, { data: memberships }] = await Promise.all([
+      supabase.from("profiles").select("id, full_name").in("id", athleteIds),
+      supabase.from("team_memberships").select("athlete_id, team_id").in("athlete_id", athleteIds),
+    ]);
+    for (const p of profiles ?? []) athleteName[p.id] = p.full_name;
+    for (const m of memberships ?? []) if (teamName[m.team_id]) athleteTeam[m.athlete_id] = teamName[m.team_id];
+  }
+
+  return cals
+    .map((c) => ({
+      id: c.id,
+      label: c.athlete_id ? `${athleteName[c.athlete_id] ?? "Unknown athlete"} — ${c.name}` : c.name,
+      team: c.athlete_id ? athleteTeam[c.athlete_id] ?? null : (c.team_id ? teamName[c.team_id] ?? null : null),
+    }))
+    .sort((a, b) => (a.team ?? "~").localeCompare(b.team ?? "~") || a.label.localeCompare(b.label));
+}
+
+export async function copyWorkout(workoutId: string, targetDates: string[], replace = false, targetCalendarIds?: string[]) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
   const [{ data: workout }, { data: workoutExercises }] = await Promise.all([
     supabase.from("workouts").select("calendar_id, title, notes").eq("id", workoutId).single(),
@@ -87,49 +132,62 @@ export async function copyWorkout(workoutId: string, targetDates: string[], repl
 
   if (!workout) return;
 
-  for (const date of targetDates) {
-    if (replace) {
-      // Delete any existing workouts on the same calendar+date (cascades to exercises via FK)
-      const { data: existing } = await supabase
-        .from("workouts")
-        .select("id")
-        .eq("calendar_id", workout.calendar_id)
-        .eq("date", date);
-      if (existing?.length) {
-        await supabase.from("workouts").delete().in("id", existing.map((w) => w.id));
-      }
-    }
-
-    const { data: newWorkout, error: workoutErr } = await supabase
-      .from("workouts")
-      .insert({ calendar_id: workout.calendar_id, date, title: workout.title, notes: workout.notes })
-      .select("id")
-      .single();
-
-    if (workoutErr || !newWorkout) throw new Error(workoutErr?.message ?? "Failed to copy workout");
-
-    if (workoutExercises?.length) {
-      const { error: exErr } = await supabase.from("workout_exercises").insert(
-        workoutExercises.map((we) => ({
-          workout_id: newWorkout.id,
-          exercise_id: we.exercise_id,
-          sort_order: we.sort_order,
-          sets: we.sets,
-          reps: we.reps,
-          load: we.load,
-          load_type: we.load_type,
-          tempo: we.tempo,
-          rest_seconds: we.rest_seconds,
-          notes: we.notes,
-          is_pr_tracking: we.is_pr_tracking,
-          superset_group: we.superset_group,
-        }))
-      );
-      if (exErr) throw new Error(exErr.message);
-    }
+  const calendarIds = targetCalendarIds?.length ? [...new Set(targetCalendarIds)] : [workout.calendar_id];
+  const { data: owned } = await supabase
+    .from("calendars")
+    .select("id")
+    .eq("coach_id", effectiveCoachId)
+    .in("id", [...calendarIds, workout.calendar_id]);
+  const ownedIds = new Set((owned ?? []).map((c) => c.id));
+  if (!ownedIds.has(workout.calendar_id) || calendarIds.some((id) => !ownedIds.has(id))) {
+    throw new Error("Not authorized");
   }
 
-  revalidatePath(`/coach/calendar/${workout.calendar_id}`);
+  for (const calendarId of calendarIds) {
+    for (const date of targetDates) {
+      if (replace) {
+        // Delete any existing workouts on the same calendar+date (cascades to exercises via FK)
+        const { data: existing } = await supabase
+          .from("workouts")
+          .select("id")
+          .eq("calendar_id", calendarId)
+          .eq("date", date);
+        if (existing?.length) {
+          await supabase.from("workouts").delete().in("id", existing.map((w) => w.id));
+        }
+      }
+
+      const { data: newWorkout, error: workoutErr } = await supabase
+        .from("workouts")
+        .insert({ calendar_id: calendarId, date, title: workout.title, notes: workout.notes })
+        .select("id")
+        .single();
+
+      if (workoutErr || !newWorkout) throw new Error(workoutErr?.message ?? "Failed to copy workout");
+
+      if (workoutExercises?.length) {
+        const { error: exErr } = await supabase.from("workout_exercises").insert(
+          workoutExercises.map((we) => ({
+            workout_id: newWorkout.id,
+            exercise_id: we.exercise_id,
+            sort_order: we.sort_order,
+            sets: we.sets,
+            reps: we.reps,
+            load: we.load,
+            load_type: we.load_type,
+            tempo: we.tempo,
+            rest_seconds: we.rest_seconds,
+            notes: we.notes,
+            is_pr_tracking: we.is_pr_tracking,
+            superset_group: we.superset_group,
+            is_pre_activation: we.is_pre_activation,
+          }))
+        );
+        if (exErr) throw new Error(exErr.message);
+      }
+    }
+    revalidatePath(`/coach/calendar/${calendarId}`);
+  }
 }
 
 async function assertCoachOwnsWorkoutExercise(supabase: Awaited<ReturnType<typeof createClient>>, workoutExerciseId: string, coachId: string) {

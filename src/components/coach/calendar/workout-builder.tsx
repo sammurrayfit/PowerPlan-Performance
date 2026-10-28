@@ -556,7 +556,7 @@ export function WorkoutBuilder({ workout, initialExercises, allExercises, calend
           <p className="text-sm text-muted-foreground">{workout.date}</p>
         </div>
         <div className="flex items-center gap-2 pt-6">
-          <CopyWorkoutModal workoutId={workout.id} workoutTitle={title} />
+          <CopyWorkoutModal workoutId={workout.id} workoutTitle={title} calendarId={calendarId} />
           <Button variant="outline" size="sm" onClick={toggleLock}>
             {isLocked ? <><Unlock className="h-4 w-4 mr-1.5" /> Unlock</> : <><Lock className="h-4 w-4 mr-1.5" /> Lock</>}
           </Button>
