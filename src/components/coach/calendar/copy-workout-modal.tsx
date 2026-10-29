@@ -153,10 +153,10 @@ export function CopyWorkoutModal({ workoutId, workoutTitle, calendarId }: CopyWo
 
   useEffect(() => {
     if (!open || calendars) return;
-    listCopyTargetCalendars()
+    listCopyTargetCalendars(workoutId)
       .then(setCalendars)
       .catch(() => toast.error("Failed to load calendars"));
-  }, [open, calendars]);
+  }, [open, calendars, workoutId]);
   const [mode, setMode] = useState<Mode>("single");
   const [loading, setLoading] = useState(false);
   const [replace, setReplace] = useState(false);
