@@ -83,22 +83,38 @@ export interface CopyTargetCalendar {
   team: string | null;
 }
 
-// Every calendar the coach can copy into: team calendars plus athletes' personal
-// calendars (labelled with the athlete's name, since many share a calendar name).
-export async function listCopyTargetCalendars(): Promise<CopyTargetCalendar[]> {
+// Every calendar the coach can copy into: team calendars plus one entry per
+// athlete. Athletes have several personal calendars (Pre-Activation and one per
+// program block), so each athlete's entry points at the calendar this workout
+// belongs on: their Pre-Activation calendar for Pre-Activation, otherwise their
+// newest program calendar. The source calendar always represents its athlete.
+export async function listCopyTargetCalendars(workoutId: string): Promise<CopyTargetCalendar[]> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
   const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
-  const [{ data: calendars }, { data: teams }] = await Promise.all([
-    supabase.from("calendars").select("id, name, team_id, athlete_id").eq("coach_id", effectiveCoachId),
+  const [{ data: workout }, { data: calendars }, { data: teams }] = await Promise.all([
+    supabase.from("workouts").select("calendar_id, title").eq("id", workoutId).single(),
+    supabase.from("calendars").select("id, name, team_id, athlete_id, created_at").eq("coach_id", effectiveCoachId),
     supabase.from("teams").select("id, name").eq("coach_id", effectiveCoachId),
   ]);
   const cals = calendars ?? [];
   const teamName = Object.fromEntries((teams ?? []).map((t) => [t.id, t.name]));
+  const isPreActivation = workout?.title === "Pre-Activation";
 
-  const athleteIds = [...new Set(cals.map((c) => c.athlete_id).filter(Boolean))] as string[];
+  const calsByAthlete: Record<string, typeof cals> = {};
+  for (const c of cals) if (c.athlete_id) (calsByAthlete[c.athlete_id] ??= []).push(c);
+  function athleteTarget(athleteCals: typeof cals) {
+    const source = athleteCals.find((c) => c.id === workout?.calendar_id);
+    if (source) return source;
+    const newestFirst = [...athleteCals].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    const preAct = newestFirst.find((c) => c.name === "Pre-Activation");
+    const program = newestFirst.find((c) => c.name !== "Pre-Activation");
+    return (isPreActivation ? preAct ?? program : program ?? preAct) ?? newestFirst[0];
+  }
+
+  const athleteIds = Object.keys(calsByAthlete);
   const athleteName: Record<string, string> = {};
   const athleteTeam: Record<string, string> = {};
   if (athleteIds.length) {
@@ -110,12 +126,16 @@ export async function listCopyTargetCalendars(): Promise<CopyTargetCalendar[]> {
     for (const m of memberships ?? []) if (teamName[m.team_id]) athleteTeam[m.athlete_id] = teamName[m.team_id];
   }
 
-  return cals
-    .map((c) => ({
-      id: c.id,
-      label: c.athlete_id ? `${athleteName[c.athlete_id] ?? "Unknown athlete"} — ${c.name}` : c.name,
-      team: c.athlete_id ? athleteTeam[c.athlete_id] ?? null : (c.team_id ? teamName[c.team_id] ?? null : null),
-    }))
+  const teamEntries = cals
+    .filter((c) => !c.athlete_id)
+    .map((c) => ({ id: c.id, label: c.name, team: c.team_id ? teamName[c.team_id] ?? null : null }));
+  const athleteEntries = athleteIds.map((athleteId) => ({
+    id: athleteTarget(calsByAthlete[athleteId]).id,
+    label: athleteName[athleteId] ?? "Unknown athlete",
+    team: athleteTeam[athleteId] ?? null,
+  }));
+
+  return [...teamEntries, ...athleteEntries]
     .sort((a, b) => (a.team ?? "~").localeCompare(b.team ?? "~") || a.label.localeCompare(b.label));
 }
 
