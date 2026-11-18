@@ -558,6 +558,77 @@ function RPEPrompt({
   );
 }
 
+// ── RPE unlock: shown in place of the main lift until the athlete logs RPE ──
+type SavePreRPEFn = (params: { workoutIds: string[]; athleteId: string; rpePre: number }) => Promise<void>;
+
+async function savePreRPEDirect({ workoutIds, athleteId, rpePre }: { workoutIds: string[]; athleteId: string; rpePre: number }) {
+  const supabase = createClient();
+  const { error } = await supabase.from("attendance").upsert(
+    workoutIds.map((workout_id) => ({ workout_id, athlete_id: athleteId, rpe_pre: rpePre, status: "present" })),
+    { onConflict: "workout_id,athlete_id" }
+  );
+  if (error) throw new Error(error.message);
+}
+
+function PreRPEUnlock({
+  workoutIds,
+  athleteId,
+  onSave,
+  onUnlocked,
+}: {
+  workoutIds: string[];
+  athleteId: string;
+  onSave: SavePreRPEFn;
+  onUnlocked: () => void;
+}) {
+  const [selected, setSelected] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    if (selected == null) return;
+    setSaving(true);
+    try {
+      await onSave({ workoutIds, athleteId, rpePre: selected });
+      onUnlocked();
+    } catch {
+      toast.error("Failed to save RPE — try again.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="border-2 border-primary/40">
+      <CardContent className="space-y-4 pt-6">
+        <div className="text-center">
+          <p className="font-semibold">What is your post training RPE?</p>
+          <p className="mt-1 text-sm text-muted-foreground">Log it to unlock the rest of your workout.</p>
+        </div>
+        <div className="grid grid-cols-6 gap-2">
+          {RPE_OPTIONS.map((n) => (
+            <button
+              key={n}
+              onClick={() => setSelected(n)}
+              className={`h-12 rounded-lg border-2 text-sm font-semibold transition-all ${
+                selected === n ? "border-primary bg-primary text-primary-foreground" : "border-border hover:border-primary/50"
+              }`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+        {selected != null && (
+          <p className="text-center text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">RPE {selected}</span> — {RPE_LABELS[selected]}
+          </p>
+        )}
+        <Button className="w-full" disabled={selected == null || saving} onClick={submit}>
+          {saving ? "Unlocking…" : "Unlock workout"}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 type SaveSetFn = (params: {
   workoutExerciseId: string;
   athleteId: string;
@@ -577,6 +648,8 @@ export function WorkoutLogger({
   onSaveSet,
   onSaveAttendance,
   dGroupOptional = true,
+  preRPEGate,
+  onSavePreRPE,
 }: {
   workout: Workout;
   exercises: Exercise[];
@@ -585,8 +658,13 @@ export function WorkoutLogger({
   onSaveSet?: SaveSetFn;
   onSaveAttendance?: (params: { workoutId: string; athleteId: string; rpePost: number }) => Promise<void>;
   dGroupOptional?: boolean;
+  /** When set, the main lift stays locked until the athlete logs a pre-RPE;
+   *  the answer is saved to every workout in workoutIds. Pre-Activation stays open. */
+  preRPEGate?: { workoutIds: string[] } | null;
+  onSavePreRPE?: SavePreRPEFn;
 }) {
   const [showRPEPrompt, setShowRPEPrompt] = useState(false);
+  const [mainUnlocked, setMainUnlocked] = useState(!preRPEGate);
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
 
   const handleProgress = useCallback((exerciseId: string, completed: number) => {
@@ -704,7 +782,15 @@ export function WorkoutLogger({
                 </div>
               </>
             )}
-            {mainExercises.map((ex, i) => (
+            {!mainUnlocked && mainExercises.length > 0 && (
+              <PreRPEUnlock
+                workoutIds={preRPEGate?.workoutIds ?? [workout.id]}
+                athleteId={athleteId}
+                onSave={onSavePreRPE ?? savePreRPEDirect}
+                onUnlocked={() => setMainUnlocked(true)}
+              />
+            )}
+            {mainUnlocked && mainExercises.map((ex, i) => (
               <Fragment key={ex.id}>
                 {dGroupOptional && startsOptionalBlock(ex.superset_group, mainExercises[i - 1]?.superset_group ?? null) && (
                   <div className="flex items-center gap-2 pt-1">
@@ -725,14 +811,16 @@ export function WorkoutLogger({
             ))}
           </div>
         )}
-        <Button
-          variant="outline"
-          className="w-full gap-2"
-          onClick={() => setShowRPEPrompt(true)}
-        >
-          <Flag className="w-4 h-4" />
-          Finish Workout
-        </Button>
+        {(mainUnlocked || mainExercises.length === 0) && (
+          <Button
+            variant="outline"
+            className="w-full gap-2"
+            onClick={() => setShowRPEPrompt(true)}
+          >
+            <Flag className="w-4 h-4" />
+            Finish Workout
+          </Button>
+        )}
       </div>
 
       {showRPEPrompt && (

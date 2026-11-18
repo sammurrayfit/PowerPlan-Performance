@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { fetchAthleteWorkoutData, saveKioskSet, saveKioskAttendance } from "@/app/(coach)/coach/weightroom/actions";
+import { fetchAthleteWorkoutData, saveKioskSet, saveKioskAttendance, fetchKioskHasPreRPE, saveKioskPreRPE } from "@/app/(coach)/coach/weightroom/actions";
 import { WorkoutLogger } from "@/components/athlete/workout-logger";
 import { Maximize2, Minimize2, ArrowLeft, CheckCircle2, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,8 @@ type ActiveSession = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   exerciseData: any[];
   celebrating: boolean;
+  /** Main-lift workouts still waiting on this athlete's RPE (null = unlocked) */
+  preRPEWorkoutIds: string[] | null;
 };
 
 // ── Fullscreen toggle ─────────────────────────────────────────────────────────
@@ -127,6 +129,8 @@ function AthletePanel({
           athleteId={session.athlete.id}
           onSaveSet={saveKioskSet}
           onSaveAttendance={saveKioskAttendance}
+          preRPEGate={session.preRPEWorkoutIds ? { workoutIds: session.preRPEWorkoutIds } : null}
+          onSavePreRPE={saveKioskPreRPE}
         />
       </div>
     </div>
@@ -154,10 +158,28 @@ export function AthleteKiosk({ workouts, profiles, date }: Props) {
     const workoutId = selectedWorkout.workoutIdByAthlete?.[athlete.id] ?? selectedWorkout.id;
     setLoadingIds((prev) => new Set(prev).add(athlete.id));
     try {
-      const data = await fetchAthleteWorkoutData(workoutId, athlete.id);
+      // RPE gate: on today's date (New York time) the main lift stays locked
+      // until the athlete logs an RPE. Pre-Activation is never locked.
+      const todayNY = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+      const mainIds =
+        date === todayNY
+          ? workouts
+              .filter((w) => w.title !== "Pre-Activation" && w.athleteIds.includes(athlete.id))
+              .map((w) => w.workoutIdByAthlete?.[athlete.id] ?? w.id)
+          : [];
+      const [data, hasPreRPE] = await Promise.all([
+        fetchAthleteWorkoutData(workoutId, athlete.id),
+        fetchKioskHasPreRPE({ workoutIds: mainIds, athleteId: athlete.id }),
+      ]);
       setActiveSessions((prev) => [
         ...prev,
-        { athlete, workoutId, exerciseData: data, celebrating: false },
+        {
+          athlete,
+          workoutId,
+          exerciseData: data,
+          celebrating: false,
+          preRPEWorkoutIds: hasPreRPE ? null : mainIds,
+        },
       ]);
     } finally {
       setLoadingIds((prev) => {

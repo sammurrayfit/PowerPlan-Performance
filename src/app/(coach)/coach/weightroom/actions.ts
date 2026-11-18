@@ -143,6 +143,53 @@ export async function saveKioskAttendance(params: {
   if (error) throw new Error(error.message);
 }
 
+// ── Kiosk pre-RPE gate ────────────────────────────────────────────────────────
+// The main lift stays locked in the weightroom until the athlete logs an RPE.
+async function assertCoachOwnsWorkouts(workoutIds: string[]) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
+  const { data: rows } = await supabase
+    .from("workouts")
+    .select("id, calendars(coach_id)")
+    .in("id", workoutIds);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const owned = (rows ?? []).filter((r: any) => r.calendars?.coach_id === effectiveCoachId);
+  if (owned.length !== new Set(workoutIds).size) throw new Error("Not authorized");
+}
+
+/** True when the athlete already has a pre-RPE on any of these workouts. */
+export async function fetchKioskHasPreRPE(params: { workoutIds: string[]; athleteId: string }): Promise<boolean> {
+  if (params.workoutIds.length === 0) return true;
+  await assertCoachOwnsWorkouts(params.workoutIds);
+  const { data } = await adminClient()
+    .from("attendance")
+    .select("id")
+    .in("workout_id", params.workoutIds)
+    .eq("athlete_id", params.athleteId)
+    .not("rpe_pre", "is", null)
+    .limit(1);
+  return (data?.length ?? 0) > 0;
+}
+
+export async function saveKioskPreRPE(params: { workoutIds: string[]; athleteId: string; rpePre: number }): Promise<void> {
+  if (params.workoutIds.length === 0) return;
+  await assertCoachOwnsWorkouts(params.workoutIds);
+  const { error } = await adminClient()
+    .from("attendance")
+    .upsert(
+      params.workoutIds.map((workout_id) => ({
+        workout_id,
+        athlete_id: params.athleteId,
+        rpe_pre: params.rpePre,
+        status: "present",
+      })),
+      { onConflict: "workout_id,athlete_id" }
+    );
+  if (error) throw new Error(error.message);
+}
+
 // ── Single-athlete (used by athlete self-log) ─────────────────────────────────
 export async function fetchAthleteWorkoutData(workoutId: string, athleteId: string) {
   const supabase = await createClient();

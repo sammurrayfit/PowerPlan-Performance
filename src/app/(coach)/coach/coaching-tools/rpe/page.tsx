@@ -21,7 +21,11 @@ export default async function RPEPage() {
   const directAthleteIds = (calendars ?? []).map((c) => c.athlete_id).filter(Boolean) as string[];
 
   const { data: memberships } = teamIds.length > 0
-    ? await supabase.from("team_memberships").select("athlete_id").in("team_id", teamIds)
+    ? await supabase.from("team_memberships").select("team_id, athlete_id").in("team_id", teamIds)
+    : { data: [] };
+
+  const { data: teams } = teamIds.length > 0
+    ? await supabase.from("teams").select("id, name").in("id", teamIds).order("name")
     : { data: [] };
 
   const allAthleteIds = [
@@ -39,10 +43,24 @@ export default async function RPEPage() {
         .order("full_name")
     : { data: [] };
 
+  // Age group = team name (U13, U15, ...); an athlete can be in more than one
+  const teamName = Object.fromEntries((teams ?? []).map((t) => [t.id, t.name as string]));
+  const athleteGroups: Record<string, string[]> = {};
+  for (const m of memberships ?? []) {
+    const name = teamName[m.team_id];
+    if (name) (athleteGroups[m.athlete_id] ??= []).push(name);
+  }
+
   return (
     <RPEMonitor
       calendarIds={calendarIds}
-      athletes={(athletes ?? []) as { id: string; full_name: string }[]}
+      athletes={((athletes ?? []) as { id: string; full_name: string }[]).map((a) => ({
+        ...a,
+        groups: [...new Set(athleteGroups[a.id] ?? [])].sort(),
+      }))}
+      ageGroups={[...new Set(Object.values(teamName))].sort((a, b) =>
+        a.localeCompare(b, undefined, { numeric: true })
+      )}
     />
   );
 }
