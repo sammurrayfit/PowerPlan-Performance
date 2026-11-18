@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
-import { compareWorkoutOrder } from "@/lib/utils";
+import { compareWorkoutOrder, todayNY } from "@/lib/utils";
 
 interface Props {
   searchParams: Promise<{ month?: string }>;
@@ -81,7 +81,7 @@ export default async function AthleteCalendarPage({ searchParams }: Props) {
   for (let i = 0; i < firstDayOfWeek; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
-  const todayStr = now.toISOString().split("T")[0];
+  const todayStr = todayNY();
 
   const prev = monthIndex === 0
     ? { year: year - 1, month: 11 }

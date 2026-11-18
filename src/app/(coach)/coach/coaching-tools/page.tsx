@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { todayNY } from "@/lib/utils";
 import { getEffectiveCoachId } from "@/lib/supabase/coach";
 import { WeightroomKiosk } from "@/components/coach/weightroom/weightroom-kiosk";
 
@@ -8,7 +9,7 @@ export default async function CoachingToolsPage() {
   if (!user) return null;
   const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayNY();
 
   const { data: calendars } = await supabase
     .from("calendars")

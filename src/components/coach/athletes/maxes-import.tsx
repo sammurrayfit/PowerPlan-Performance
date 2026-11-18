@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import { todayNY } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { FileSpreadsheet, Upload, AlertCircle, CheckCircle2 } from "lucide-react";
@@ -60,7 +61,7 @@ export function MaxesImport() {
       return;
     }
 
-    const today = new Date().toISOString().split("T")[0];
+    const today = todayNY();
     const parsed: ParsedRow[] = [];
 
     for (const row of rawRows.slice(1) as unknown[][]) {

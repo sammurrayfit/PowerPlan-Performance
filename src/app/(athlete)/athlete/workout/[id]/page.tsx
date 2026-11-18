@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { todayNY } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/server";
 import { WorkoutLogger } from "@/components/athlete/workout-logger";
 
@@ -147,9 +148,8 @@ export default async function AthleteWorkoutPage({ params }: Props) {
   // lift unlocks once the athlete logs an RPE. Applies on the workout's day
   // (team runs on New York time) and always when a coach has locked it. One
   // answer unlocks every main workout that day.
-  const todayNY = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
   const isPreActivation = workout.title === "Pre-Activation";
-  const gateApplies = !isPreActivation && (workout.date === todayNY || workout.is_locked);
+  const gateApplies = !isPreActivation && (workout.date === todayNY() || workout.is_locked);
   let sameDayWorkoutIds: string[] = [id];
   let hasPreRPE = attendance?.rpe_pre != null;
 

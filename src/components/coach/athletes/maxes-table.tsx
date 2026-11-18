@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { todayNY } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,7 +46,7 @@ function AddMaxDialog({
   const [value, setValue] = useState("");
   const [reps, setReps] = useState("1");
   const [unit, setUnit] = useState<Unit>("lbs");
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(todayNY());
 
   const filtered = exercises
     .filter((e) => e.name.toLowerCase().includes(search.toLowerCase()))

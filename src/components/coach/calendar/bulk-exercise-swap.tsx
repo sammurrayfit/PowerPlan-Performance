@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { todayNY } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -28,7 +29,7 @@ interface Match {
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function todayStr() {
-  return new Date().toISOString().split("T")[0];
+  return todayNY();
 }
 
 function formatDate(date: string) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { todayNY } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { TrendingUp, Trash2, ChevronDown, ChevronRight, Check } from "lucide-react";
@@ -66,7 +67,7 @@ export function AthleteMaxes({ currentMaxes, maxHistory, exercises }: Props) {
   async function handleSave() {
     if (!selected || !weight) return;
     setSaving(true);
-    await addAthleteMax(selected.id, epley1RM(Number(weight), repsNum), new Date().toISOString().split("T")[0], unit);
+    await addAthleteMax(selected.id, epley1RM(Number(weight), repsNum), todayNY(), unit);
     setSaving(false);
     setSaved(true);
     setTimeout(reset, 1000);
