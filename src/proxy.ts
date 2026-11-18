@@ -1,13 +1,16 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { cookieOptionsFor, EMBED_COOKIE_ATTRS } from "@/lib/supabase/embed";
 
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
+  const embedOptions = cookieOptionsFor(request.cookies);
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: embedOptions,
       cookies: {
         getAll() {
           return request.cookies.getAll();
@@ -32,7 +35,7 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Public routes — no auth needed
-  const publicPaths = ["/login", "/signup", "/invite"];
+  const publicPaths = ["/login", "/signup", "/invite", "/auth/ams"];
   if (publicPaths.some((p) => pathname.startsWith(p))) {
     return supabaseResponse;
   }
@@ -55,10 +58,9 @@ export async function proxy(request: NextRequest) {
     role = profile?.role ?? undefined;
     if (role) {
       supabaseResponse.cookies.set("pp_role", role, {
+        ...(embedOptions ? EMBED_COOKIE_ATTRS : { sameSite: "lax" as const, path: "/" }),
         httpOnly: true,
-        sameSite: "lax",
         maxAge: 60 * 60, // 1 hour
-        path: "/",
       });
     }
   }
