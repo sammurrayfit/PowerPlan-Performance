@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { todayNY } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +14,7 @@ export default async function AthleteDashboard() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayNY();
 
   const { data: profile } = await supabase.from("profiles").select("full_name").eq("id", user.id).single();
   const firstName = profile?.full_name?.split(" ")[0] ?? "";

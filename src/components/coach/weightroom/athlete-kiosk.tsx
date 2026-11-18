@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { todayNY } from "@/lib/utils";
 import { fetchAthleteWorkoutData, saveKioskSet, saveKioskAttendance, fetchKioskHasPreRPE, saveKioskPreRPE } from "@/app/(coach)/coach/weightroom/actions";
 import { WorkoutLogger } from "@/components/athlete/workout-logger";
 import { Maximize2, Minimize2, ArrowLeft, CheckCircle2, X, Loader2 } from "lucide-react";
@@ -160,9 +161,8 @@ export function AthleteKiosk({ workouts, profiles, date }: Props) {
     try {
       // RPE gate: on today's date (New York time) the main lift stays locked
       // until the athlete logs an RPE. Pre-Activation is never locked.
-      const todayNY = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
       const mainIds =
-        date === todayNY
+        date === todayNY()
           ? workouts
               .filter((w) => w.title !== "Pre-Activation" && w.athleteIds.includes(athlete.id))
               .map((w) => w.workoutIdByAthlete?.[athlete.id] ?? w.id)

@@ -4,7 +4,7 @@ import { getEffectiveCoachId, getCoachGroupIds } from "@/lib/supabase/coach";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CalendarDays, Users, Dumbbell, TrendingUp, Trophy, CheckCircle2, Circle } from "lucide-react";
-import { compareWorkoutOrder } from "@/lib/utils";
+import { compareWorkoutOrder, todayNY } from "@/lib/utils";
 import { fetchCompletedWorkouts } from "@/app/(coach)/coach/coaching-tools/reports/actions";
 import { CompletedWorkoutsReport } from "@/components/coach/coaching-tools/reports/completed-workouts-report";
 
@@ -41,7 +41,7 @@ export default async function CoachDashboard() {
   const coachGroupIds = await getCoachGroupIds(supabase, effectiveCoachId);
 
   const { start: weekStart, end: weekEnd } = isoWeekBounds();
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayNY();
   const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0];
 
   // ── Base coach data ─────────────────────────────────────────────────────────

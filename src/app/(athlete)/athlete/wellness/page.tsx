@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { todayNY } from "@/lib/utils";
 import { WellnessShell } from "@/components/athlete/wellness-shell";
 
 export default async function WellnessPage() {
@@ -6,7 +7,7 @@ export default async function WellnessPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayNY();
 
   const [{ data: checkins }, { data: nutrition }] = await Promise.all([
     supabase

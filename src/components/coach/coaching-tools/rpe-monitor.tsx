@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { todayNY } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,7 @@ interface Props {
 }
 
 function todayISO() {
-  return new Date().toISOString().split("T")[0];
+  return todayNY();
 }
 
 function shiftDate(date: string, days: number): string {

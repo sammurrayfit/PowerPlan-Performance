@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { todayNY } from "@/lib/utils";
 import { getEffectiveCoachId } from "@/lib/supabase/coach";
 import { AthleteKiosk } from "@/components/coach/weightroom/athlete-kiosk";
 import { DateNav } from "@/components/coach/weightroom/date-nav";
@@ -13,7 +14,7 @@ export default async function WeightroomPage({ searchParams }: Props) {
   if (!user) return null;
   const effectiveCoachId = await getEffectiveCoachId(supabase, user.id);
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayNY();
   const sp = await searchParams;
   const date = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : today;
 
