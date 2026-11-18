@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition, useEffect, useCallback } from "react";
+import { useState, useTransition, useEffect, useCallback, useMemo } from "react";
+import { compareWorkoutOrder } from "@/lib/utils";
 import {
   fetchAthleteWorkoutData,
   fetchMultiAthleteData,
@@ -183,38 +184,56 @@ function AthleteCard({
 // ── Main kiosk component ──────────────────────────────────────────────────────
 
 export function WeightroomKiosk({ workouts, profiles }: Props) {
-  type Mode = "workout-select" | "athlete-select" | "multi-view" | "single-view";
+  type Mode = "athlete-select" | "multi-view" | "single-view";
 
-  const [mode, setMode] = useState<Mode>(
-    workouts.length === 1 ? "athlete-select" : "workout-select"
-  );
-  const [selectedWorkout, setSelectedWorkout] = useState<WorkoutOption | null>(
-    workouts.length === 1 ? workouts[0] : null
-  );
+  const [mode, setMode] = useState<Mode>("athlete-select");
   const [selectedAthleteIds, setSelectedAthleteIds] = useState<string[]>([]);
   const [panelData, setPanelData] = useState<AthletePanel[]>([]);
   const [singleAthlete, setSingleAthlete] = useState<Profile | null>(null);
-  const [singleExerciseData, setSingleExerciseData] = useState<unknown[] | null>(null);
+  const [singleData, setSingleData] = useState<{ workout: WorkoutOption; exercises: unknown[] }[] | null>(null);
   const [isPending, startTransition] = useTransition();
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-  // ── Derived ──────────────────────────────────────────────────────────────
-  const workoutAthletes = profiles.filter(
-    (p) => selectedWorkout?.athleteIds.includes(p.id)
-  );
+  // ── Derived: each athlete's workouts today (Pre-Activation first) ─────────
+  const workoutsByAthlete = useMemo(() => {
+    const map: Record<string, WorkoutOption[]> = {};
+    for (const w of [...workouts].sort(compareWorkoutOrder)) {
+      for (const id of w.athleteIds) (map[id] ??= []).push(w);
+    }
+    return map;
+  }, [workouts]);
 
-  // ── Multi-view data fetch ─────────────────────────────────────────────────
+  const todaysAthletes = profiles.filter((p) => workoutsByAthlete[p.id]?.length);
+
+  // ── Multi-view data fetch: one request per workout, merged per athlete ────
   const loadPanelData = useCallback(
     async (athleteIds: string[]) => {
-      if (!selectedWorkout || athleteIds.length === 0) return;
+      if (athleteIds.length === 0) return;
       setRefreshing(true);
-      const data = await fetchMultiAthleteData(selectedWorkout.id, athleteIds);
-      setPanelData(data);
+      const sorted = [...workouts].sort(compareWorkoutOrder);
+      const results = await Promise.all(
+        sorted.map((w) => {
+          const ids = w.athleteIds.filter((id) => athleteIds.includes(id));
+          return ids.length ? fetchMultiAthleteData(w.id, ids) : Promise.resolve([]);
+        })
+      );
+      const merged = athleteIds.map((athleteId): AthletePanel => {
+        const parts = results.flat().filter((p) => p.athleteId === athleteId);
+        const times = parts.map((p) => p.lastActiveAt).filter(Boolean) as string[];
+        return {
+          athleteId,
+          lastActiveAt: times.length ? times.sort().at(-1)! : null,
+          rpe_pre: parts.findLast((p) => p.rpe_pre != null)?.rpe_pre ?? null,
+          rpe_post: parts.findLast((p) => p.rpe_post != null)?.rpe_post ?? null,
+          exercises: parts.flatMap((p) => p.exercises),
+        };
+      });
+      setPanelData(merged);
       setLastRefresh(new Date());
       setRefreshing(false);
     },
-    [selectedWorkout]
+    [workouts]
   );
 
   // Auto-refresh while in multi-view
@@ -236,24 +255,28 @@ export function WeightroomKiosk({ workouts, profiles }: Props) {
   }
 
   function selectAll() {
-    setSelectedAthleteIds(
-      workoutAthletes.slice(0, MAX_ATHLETES).map((a) => a.id)
-    );
+    setSelectedAthleteIds(todaysAthletes.slice(0, MAX_ATHLETES).map((a) => a.id));
   }
 
   // ── Enter multi-view ──────────────────────────────────────────────────────
   async function handleWatchSelected() {
     if (selectedAthleteIds.length === 0) return;
-    await loadPanelData(selectedAthleteIds);
+    setPanelData([]);
     setMode("multi-view");
+    await loadPanelData(selectedAthleteIds);
   }
 
   // ── Drill into single athlete from multi-view ─────────────────────────────
   function handleExpandAthlete(athlete: Profile) {
-    if (!selectedWorkout) return;
+    const athleteWorkouts = workoutsByAthlete[athlete.id] ?? [];
     startTransition(async () => {
-      const data = await fetchAthleteWorkoutData(selectedWorkout.id, athlete.id);
-      setSingleExerciseData(data);
+      const data = await Promise.all(
+        athleteWorkouts.map(async (w) => ({
+          workout: w,
+          exercises: (await fetchAthleteWorkoutData(w.id, athlete.id)) as unknown[],
+        }))
+      );
+      setSingleData(data);
       setSingleAthlete(athlete);
       setMode("single-view");
     });
@@ -263,16 +286,10 @@ export function WeightroomKiosk({ workouts, profiles }: Props) {
   function handleBack() {
     if (mode === "single-view") {
       setSingleAthlete(null);
-      setSingleExerciseData(null);
+      setSingleData(null);
       setMode("multi-view");
     } else if (mode === "multi-view") {
       setMode("athlete-select");
-    } else if (mode === "athlete-select") {
-      if (workouts.length > 1) {
-        setSelectedWorkout(null);
-        setSelectedAthleteIds([]);
-        setMode("workout-select");
-      }
     }
   }
 
@@ -280,106 +297,48 @@ export function WeightroomKiosk({ workouts, profiles }: Props) {
     weekday: "long", month: "long", day: "numeric",
   });
 
-  // ── 1. Workout selection ──────────────────────────────────────────────────
-  if (mode === "workout-select") {
+  // ── 1. Name selection ─────────────────────────────────────────────────────
+  if (mode === "athlete-select") {
     return (
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold">Weightroom</h1>
           <p className="text-sm text-muted-foreground">{today}</p>
         </div>
-        {workouts.length === 0 ? (
+
+        {todaysAthletes.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-muted-foreground border-2 border-dashed rounded-xl">
             <p className="font-medium">No workouts scheduled for today</p>
-            <p className="text-sm mt-1">Add a workout to a calendar for today's date.</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-              Select a workout
-            </p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {workouts.map((w) => (
-                <button
-                  key={w.id}
-                  onClick={() => {
-                    setSelectedWorkout(w);
-                    setMode("athlete-select");
-                  }}
-                  className="text-left p-4 rounded-xl border-2 border-border hover:border-primary hover:bg-primary/5 transition-colors"
-                >
-                  <p className="font-semibold">{w.title}</p>
-                  <p className="text-sm text-muted-foreground mt-0.5">
-                    {w.athleteIds.length} athlete{w.athleteIds.length !== 1 ? "s" : ""}
-                  </p>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // ── 2. Athlete selection ──────────────────────────────────────────────────
-  if (mode === "athlete-select") {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          {workouts.length > 1 && (
-            <button onClick={handleBack} className="text-muted-foreground hover:text-foreground">
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-          )}
-          <div>
-            <h1 className="text-2xl font-bold">{selectedWorkout?.title}</h1>
-            <p className="text-sm text-muted-foreground">
-              {selectedWorkout &&
-                new Date(selectedWorkout.date + "T00:00:00").toLocaleDateString("en-US", {
-                  weekday: "long", month: "long", day: "numeric",
-                })}
-            </p>
-          </div>
-        </div>
-
-        {workoutAthletes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-muted-foreground border-2 border-dashed rounded-xl">
-            <p className="font-medium">No athletes assigned to this calendar</p>
+            <p className="text-sm mt-1">Add a workout to a calendar for today&apos;s date.</p>
           </div>
         ) : (
           <>
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-                Select athletes to monitor
+                Select a name
                 <span className="ml-2 normal-case text-xs">
                   ({selectedAthleteIds.length}/{MAX_ATHLETES} selected)
                 </span>
               </p>
-              <button
-                onClick={selectAll}
-                className="text-sm text-primary hover:underline"
-              >
+              <button onClick={selectAll} className="text-sm text-primary hover:underline">
                 Select all
               </button>
             </div>
 
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {workoutAthletes.map((athlete) => {
+              {todaysAthletes.map((athlete) => {
                 const isSelected = selectedAthleteIds.includes(athlete.id);
-                const isDisabled =
-                  !isSelected && selectedAthleteIds.length >= MAX_ATHLETES;
+                const isDisabled = !isSelected && selectedAthleteIds.length >= MAX_ATHLETES;
+                const titles = (workoutsByAthlete[athlete.id] ?? []).map((w) => w.title);
                 return (
                   <button
                     key={athlete.id}
                     onClick={() => toggleAthlete(athlete.id)}
                     disabled={isDisabled}
                     className={`
-                      relative flex flex-col items-center justify-center gap-2.5
-                      h-32 rounded-2xl border-2 transition-all
-                      ${isSelected
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50"
-                      }
+                      relative flex flex-col items-center justify-center gap-2
+                      min-h-32 py-3 rounded-2xl border-2 transition-all
+                      ${isSelected ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"}
                       ${isDisabled ? "opacity-40 cursor-not-allowed" : ""}
                     `}
                   >
@@ -393,6 +352,9 @@ export function WeightroomKiosk({ workouts, profiles }: Props) {
                     </div>
                     <span className="font-medium text-sm text-center px-2 leading-tight">
                       {athlete.full_name}
+                    </span>
+                    <span className="text-xs text-muted-foreground text-center px-2 leading-tight">
+                      {titles.join(" · ")}
                     </span>
                   </button>
                 );
@@ -417,8 +379,8 @@ export function WeightroomKiosk({ workouts, profiles }: Props) {
     );
   }
 
-  // ── 3. Single-athlete full logger (drill-down from multi-view) ────────────
-  if (mode === "single-view" && singleAthlete && singleExerciseData && selectedWorkout) {
+  // ── 2. Single-athlete full logger (drill-down from multi-view) ────────────
+  if (mode === "single-view" && singleAthlete && singleData) {
     return (
       <div className="space-y-4">
         <button
@@ -428,16 +390,26 @@ export function WeightroomKiosk({ workouts, profiles }: Props) {
           <ArrowLeft className="h-4 w-4" />
           Back to overview
         </button>
-        <WorkoutLogger
-          workout={{ ...selectedWorkout, notes: null, is_locked: false }}
-          exercises={singleExerciseData as never[]}
-          athleteId={singleAthlete.id}
-        />
+        <h1 className="text-xl font-bold">{singleAthlete.full_name}</h1>
+        {singleData.map(({ workout, exercises }) => (
+          <div key={workout.id} className="space-y-2">
+            {singleData.length > 1 && (
+              <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+                {workout.title}
+              </p>
+            )}
+            <WorkoutLogger
+              workout={{ ...workout, notes: null, is_locked: false }}
+              exercises={exercises as never[]}
+              athleteId={singleAthlete.id}
+            />
+          </div>
+        ))}
       </div>
     );
   }
 
-  // ── 4. Multi-athlete panel view ───────────────────────────────────────────
+  // ── 3. Multi-athlete panel view ───────────────────────────────────────────
   const cols =
     selectedAthleteIds.length <= 2
       ? "grid-cols-1 sm:grid-cols-2"
@@ -450,14 +422,11 @@ export function WeightroomKiosk({ workouts, profiles }: Props) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <button
-            onClick={handleBack}
-            className="text-muted-foreground hover:text-foreground"
-          >
+          <button onClick={handleBack} className="text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div>
-            <h1 className="text-xl font-bold">{selectedWorkout?.title}</h1>
+            <h1 className="text-xl font-bold">Weightroom · {today}</h1>
             <p className="text-sm text-muted-foreground">
               {selectedAthleteIds.length} athlete{selectedAthleteIds.length !== 1 ? "s" : ""} · watching live
             </p>

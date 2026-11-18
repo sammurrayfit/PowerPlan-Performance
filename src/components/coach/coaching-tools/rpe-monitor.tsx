@@ -17,7 +17,8 @@ interface AthleteRPE {
 
 interface Props {
   calendarIds: string[];
-  athletes: { id: string; full_name: string }[];
+  athletes: { id: string; full_name: string; groups: string[] }[];
+  ageGroups: string[];
 }
 
 function todayISO() {
@@ -39,27 +40,24 @@ function timeAgo(iso: string) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-function RPEBadge({ label, value }: { label: string; value: number | null }) {
+function RPECell({ value }: { value: number | null }) {
+  if (value == null) return <span className="text-muted-foreground/40">—</span>;
+  const tone =
+    value >= 8 ? "bg-red-500/15 text-red-600 dark:text-red-400"
+    : value >= 6 ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+    : "bg-green-500/15 text-green-700 dark:text-green-400";
   return (
-    <div className="flex flex-col items-center gap-0.5">
-      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
-        {label}
+    <span className="inline-flex items-center gap-2">
+      <span className={`inline-flex h-7 min-w-7 items-center justify-center rounded-md px-1.5 text-sm font-bold tabular-nums ${tone}`}>
+        {value}
       </span>
-      {value != null ? (
-        <div className="flex flex-col items-center">
-          <span className="text-2xl font-bold tabular-nums">{value}</span>
-          <span className="text-[10px] text-muted-foreground text-center leading-tight max-w-[80px]">
-            {RPE_LABELS[value]}
-          </span>
-        </div>
-      ) : (
-        <span className="text-xl font-light text-muted-foreground/40">—</span>
-      )}
-    </div>
+      <span className="hidden text-xs text-muted-foreground md:inline">{RPE_LABELS[value]}</span>
+    </span>
   );
 }
 
-export function RPEMonitor({ calendarIds, athletes }: Props) {
+export function RPEMonitor({ calendarIds, athletes, ageGroups }: Props) {
+  const [group, setGroup] = useState<string>("All");
   const [date, setDate] = useState(todayISO);
   const [workoutIds, setWorkoutIds] = useState<string[]>([]);
   const [rows, setRows] = useState<AthleteRPE[]>([]);
@@ -131,9 +129,17 @@ export function RPEMonitor({ calendarIds, athletes }: Props) {
     return () => clearInterval(id);
   }, [load]);
 
+  // Age-group filter
+  const inGroup = (id: string) =>
+    group === "All" || (athletes.find((a) => a.id === id)?.groups ?? []).includes(group);
+  const groupsOf = (id: string) => (athletes.find((a) => a.id === id)?.groups ?? []).join(", ");
+  const visibleAthletes = athletes.filter((a) => inGroup(a.id));
+  const visibleRows = rows.filter((r) => inGroup(r.athleteId));
+
   // Athletes who haven't submitted anything yet
   const submittedIds = new Set(rows.map((r) => r.athleteId));
-  const pending = athletes.filter((a) => !submittedIds.has(a.id));
+  const pending = visibleAthletes.filter((a) => !submittedIds.has(a.id));
+  const submittedCount = new Set(visibleRows.map((r) => r.athleteId)).size;
   const isToday = date === todayISO();
 
   const dateNav = (
@@ -195,7 +201,7 @@ export function RPEMonitor({ calendarIds, athletes }: Props) {
         {dateNav}
         <div className="flex items-center gap-3">
           <p className="text-sm text-muted-foreground">
-            {rows.length} of {athletes.length} athlete{athletes.length !== 1 ? "s" : ""} submitted
+            {submittedCount} of {visibleAthletes.length} athlete{visibleAthletes.length !== 1 ? "s" : ""} submitted
             {lastRefresh && (
               <span className="ml-2 text-xs">· updated {timeAgo(lastRefresh.toISOString())}</span>
             )}
@@ -207,51 +213,69 @@ export function RPEMonitor({ calendarIds, athletes }: Props) {
         </div>
       </div>
 
-      {/* Submitted athletes */}
-      {rows.length > 0 && (
-        <div className="rounded-lg border divide-y">
-          {rows.map((row) => (
-            <div key={`${row.athleteId}-${row.workoutTitle}`} className="flex items-center gap-4 px-4 py-3">
-              {/* Avatar + name */}
-              <div className="h-9 w-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm flex-shrink-0">
-                {row.athleteName.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm truncate">{row.athleteName}</p>
-                <p className="text-xs text-muted-foreground truncate">{row.workoutTitle}</p>
-              </div>
-
-              {/* RPE values */}
-              <div className="flex items-start gap-6">
-                <RPEBadge label="Pre" value={row.rpe_pre} />
-                <RPEBadge label="Post" value={row.rpe_post} />
-              </div>
-            </div>
+      {/* Age-group filter */}
+      {ageGroups.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide mr-1">
+            Age group
+          </span>
+          {["All", ...ageGroups].map((g) => (
+            <button
+              key={g}
+              onClick={() => setGroup(g)}
+              className={`rounded-full border px-3 py-1 text-sm transition-colors ${
+                group === g
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "hover:border-primary/50 text-muted-foreground"
+              }`}
+            >
+              {g}
+            </button>
           ))}
         </div>
       )}
 
-      {/* Waiting on */}
-      {pending.length > 0 && (
-        <div>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-            Waiting on ({pending.length})
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {pending.map((a) => (
-              <div
-                key={a.id}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm text-muted-foreground"
-              >
-                <span className="h-5 w-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold">
-                  {a.full_name.charAt(0).toUpperCase()}
-                </span>
-                {a.full_name}
-              </div>
+      {/* RPE table */}
+      <div className="rounded-lg border overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th className="px-4 py-2.5 text-left font-medium">Name</th>
+              <th className="px-4 py-2.5 text-left font-medium">Age group</th>
+              <th className="px-4 py-2.5 text-left font-medium">Workout</th>
+              <th className="px-4 py-2.5 text-left font-medium">Pre RPE</th>
+              <th className="px-4 py-2.5 text-left font-medium">Post RPE</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {visibleRows.map((row) => (
+              <tr key={`${row.athleteId}-${row.workoutTitle}`}>
+                <td className="px-4 py-2.5 font-medium">{row.athleteName}</td>
+                <td className="px-4 py-2.5 text-muted-foreground">{groupsOf(row.athleteId) || "—"}</td>
+                <td className="px-4 py-2.5 text-muted-foreground">{row.workoutTitle}</td>
+                <td className="px-4 py-2.5"><RPECell value={row.rpe_pre} /></td>
+                <td className="px-4 py-2.5"><RPECell value={row.rpe_post} /></td>
+              </tr>
             ))}
-          </div>
-        </div>
-      )}
+            {pending.map((a) => (
+              <tr key={a.id} className="text-muted-foreground">
+                <td className="px-4 py-2.5">{a.full_name}</td>
+                <td className="px-4 py-2.5">{a.groups.join(", ") || "—"}</td>
+                <td className="px-4 py-2.5 italic">Not submitted</td>
+                <td className="px-4 py-2.5"><RPECell value={null} /></td>
+                <td className="px-4 py-2.5"><RPECell value={null} /></td>
+              </tr>
+            ))}
+            {visibleRows.length === 0 && pending.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                  No athletes in {group}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
       <p className="text-xs text-center text-muted-foreground">
         Auto-refreshes every 30 seconds

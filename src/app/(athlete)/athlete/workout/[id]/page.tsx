@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { WorkoutLogger } from "@/components/athlete/workout-logger";
-import { RPEGate } from "@/components/athlete/rpe-gate";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -144,18 +143,39 @@ export default async function AthleteWorkoutPage({ params }: Props) {
   // Treat attendance query errors (e.g. RLS on team calendars) as "no attendance yet" —
   // the RPE gate handles the locked-but-no-attendance case below.
 
-  const needsRPEGate = workout.is_locked && (attendance == null || attendance.rpe_pre == null);
+  // RPE gate (inside the logger): Pre-Activation exercises stay open; the main
+  // lift unlocks once the athlete logs an RPE. Applies on the workout's day
+  // (team runs on New York time) and always when a coach has locked it. One
+  // answer unlocks every main workout that day.
+  const todayNY = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+  const isPreActivation = workout.title === "Pre-Activation";
+  const gateApplies = !isPreActivation && (workout.date === todayNY || workout.is_locked);
+  let sameDayWorkoutIds: string[] = [id];
+  let hasPreRPE = attendance?.rpe_pre != null;
 
-  if (needsRPEGate) {
-    return (
-      <RPEGate
-        workoutId={id}
-        workoutTitle={workout.title}
-        workoutDate={workout.date}
-        athleteId={user.id}
-      />
-    );
+  if (gateApplies && !hasPreRPE) {
+    // RLS limits this to workouts on the athlete's own calendars
+    const { data: dayWorkouts } = await supabase
+      .from("workouts")
+      .select("id, title")
+      .eq("date", workout.date);
+    sameDayWorkoutIds = [
+      ...new Set([
+        id,
+        ...(dayWorkouts ?? []).filter((w) => w.title !== "Pre-Activation").map((w) => w.id),
+      ]),
+    ];
+    const { data: dayPre } = await supabase
+      .from("attendance")
+      .select("id")
+      .in("workout_id", sameDayWorkoutIds)
+      .eq("athlete_id", user.id)
+      .not("rpe_pre", "is", null)
+      .limit(1);
+    hasPreRPE = (dayPre?.length ?? 0) > 0;
   }
+
+  const preRPEGate = gateApplies && !hasPreRPE ? { workoutIds: sameDayWorkoutIds } : null;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const exercises = (rawExercises ?? []) as any[];
@@ -275,6 +295,7 @@ export default async function AthleteWorkoutPage({ params }: Props) {
       athleteId={user.id}
       attendanceId={attendance?.id ?? null}
       dGroupOptional={dGroupOptional}
+      preRPEGate={preRPEGate}
     />
   );
 }
