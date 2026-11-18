@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ExerciseForm } from "./exercise-form";
-import { Pencil, Trash2, Video, Image as ImageIcon } from "lucide-react";
+import { Pencil, Trash2, Play, Image as ImageIcon } from "lucide-react";
 import { toast } from "sonner";
 import type { Database } from "@/lib/supabase/types";
 
@@ -25,6 +25,7 @@ export function ExerciseCard({ exercise, categories, userId }: ExerciseCardProps
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [playing, setPlaying] = useState(false);
 
   const category = categories.find((c) => c.id === exercise.category_id);
 
@@ -47,11 +48,37 @@ export function ExerciseCard({ exercise, categories, userId }: ExerciseCardProps
       <Card className="group hover:shadow-md transition-shadow">
         {/* Media thumbnail */}
         {exercise.video_url ? (
-          <div className="relative aspect-video bg-muted rounded-t-lg overflow-hidden">
-            <video src={exercise.video_url} className="w-full h-full object-cover" muted />
-            <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-              <Video className="h-8 w-8 text-white" />
-            </div>
+          <div className="relative aspect-video bg-black rounded-t-lg overflow-hidden">
+            {playing ? (
+              <video
+                src={exercise.video_url}
+                className="w-full h-full object-contain"
+                controls
+                autoPlay
+                playsInline
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setPlaying(true)}
+                className="group/play absolute inset-0 w-full h-full"
+                aria-label={`Play ${exercise.name} video`}
+              >
+                {/* #t=0.1 makes Safari show the first frame as a thumbnail */}
+                <video
+                  src={`${exercise.video_url}#t=0.1`}
+                  className="w-full h-full object-cover pointer-events-none"
+                  muted
+                  playsInline
+                  preload="metadata"
+                />
+                <span className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover/play:bg-black/30 transition-colors">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 shadow">
+                    <Play className="h-5 w-5 translate-x-0.5 fill-current text-black" />
+                  </span>
+                </span>
+              </button>
+            )}
           </div>
         ) : exercise.image_url ? (
           <div className="aspect-video bg-muted rounded-t-lg overflow-hidden">

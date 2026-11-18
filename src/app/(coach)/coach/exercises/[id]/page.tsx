@@ -37,7 +37,7 @@ export default async function ExerciseDetailPage({ params }: { params: Promise<{
       {/* Media */}
       {exercise.video_url && (
         <div className="rounded-lg overflow-hidden border">
-          <video src={exercise.video_url} controls className="w-full max-h-64 object-cover" />
+          <video src={exercise.video_url} controls playsInline preload="metadata" className="w-full max-h-96 object-contain bg-black" />
         </div>
       )}
       {!exercise.video_url && exercise.image_url && (
